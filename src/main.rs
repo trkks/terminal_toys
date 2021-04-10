@@ -1,8 +1,34 @@
-use terminal_toys::{ProgressBar};
+use terminal_toys::{ProgressBar, start_spinner};
 
 fn main() {
-    // Spawn some threads with their own progress bars for demonstration
+    //progressbar_thread_test();
+    spinner_test();
+}
 
+fn spinner_test() {
+    let n = 1_000_000_00;
+    let make_lots_of_halves = move|| {
+        // This'd be more fitting as an iterator, but it is evaluated instantly
+        let mut xs = Vec::new();
+        xs.reserve(n);
+        for i in 2..n+2 {
+            xs.push(i/2);
+        }
+        xs.into_iter()
+    };
+
+    print!("Running loop job ");
+    let halves = start_spinner(Box::new(make_lots_of_halves));
+    //let halves = make_lots_of_halves(n);
+    print!("Done! Calculating result ");
+    let add_mod_threes = ||halves.fold(1,|acc,x|if x%3==0{acc+1}else{acc});
+    let result = start_spinner(Box::new(add_mod_threes));
+    //let result = add_mod_threes(halves);
+    println!("The results are in: {}", result);
+}
+
+/// Spawn some threads with their own progress bars for demonstration
+fn progressbar_thread_test() {
     let n = 10_000_000;
     let threads = match std::env::args().skip(1).next() {
         Some(arg) => arg.parse().unwrap_or(0),
