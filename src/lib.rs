@@ -80,23 +80,37 @@ impl ProgressBar {
     }
 
     fn print(&mut self, row: Option<usize>) -> IOResult<()> {
+        // Choose current prefix based on if cursor should be moved to a row
         let prefix = match row {
-            // FIXME The print breaks when the stdout buffer flushes on its own
-            // for example, try with multiple threads or with a long width
             Some(r) => format!("\x1b[{};0f\r{} [", r, self.title),
             None    => format!("\r{} [", self.title),
         };
+        let prefix = prefix.as_bytes();
 
-        self.out.write(prefix.as_bytes()).map(|_| ())?;
-        self.out.write(self.bar.as_slice()).map(|_| ())?;
-        let progressed = self.bar.iter().rposition(|x| *x == '=' as u8)
-                                        .unwrap_or(0) + 1;
-        if progressed < self.bar.len() {
-            self.out.write(b"]").map(|_| ())?;
-        } else {
-            self.out.write(b"] Done!").map(|_| ())?;
+        // Flag to choose the right suffix based on the bar being full or not
+        let bar_progress = self.bar.iter().rposition(|x| *x == '=' as u8)
+                                          .unwrap_or(0) + 1;
+        let bar_full = self.bar.len() <= bar_progress;
+
+        // Create a vec for the bytes to be written
+        let mut bytes = vec![];
+                   // bar            + prefix       +"] Done!"
+        bytes.reserve(self.bar.len() + prefix.len() + 7);
+
+        // Add the correct bytes in order
+        bytes.extend(prefix);
+        bytes.extend(self.bar.as_slice());
+        if bar_full { 
+            bytes.extend(b"] Done!"); 
+        } else { 
+            bytes.extend(b"]")
         }
-        self.out.flush()
+
+        // Write into stdout
+        // NOTE Stdout needs to be locked for the write operations
+        let mut handle = self.out.lock();
+        handle.write(bytes.as_slice())?;
+        handle.flush()
     }
 }
 
