@@ -3,6 +3,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 use std::{thread, iter};
 
+pub mod snake;
+
 /// An ascii-graphics bar to easily print out the amount of progress a program
 /// has done per iteration of a loop or between some other equal sized tasks.
 ///
@@ -100,9 +102,9 @@ impl ProgressBar {
         // Add the correct bytes in order
         bytes.extend(prefix);
         bytes.extend(self.bar.as_slice());
-        if bar_full { 
-            bytes.extend(b"] Done!"); 
-        } else { 
+        if bar_full {
+            bytes.extend(b"] Done!");
+        } else {
             bytes.extend(b"]")
         }
 
