@@ -1,4 +1,4 @@
-use terminal_toys::{progress_bar::ProgressBar, start_spinner};
+use terminal_toys::{ProgressBar, start_spinner};
 
 fn main() {
     progressbar_thread_test();
@@ -19,11 +19,11 @@ fn spinner_test() {
     };
 
     print!("Running loop job ");
-    let halves = start_spinner(Box::new(make_lots_of_halves));
+    let halves = start_spinner(make_lots_of_halves);
     print!("Done! Calculating result ");
     let add_mod_threes = ||
         halves.fold(0, |acc, x| if x % 3 == 0 { acc + 1 } else { acc });
-    let result = start_spinner(Box::new(add_mod_threes));
+    let result = start_spinner(add_mod_threes);
     println!("The results are in: {}", result);
 }
 

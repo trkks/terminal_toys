@@ -6,10 +6,15 @@ use std::thread;
 pub mod snake;
 pub mod progress_bar;
 
+// Re-exports the struct to be directly used from `terminal_toys`
+pub use progress_bar::ProgressBar;
 
 /// Starts a spinner animation at the current terminal print position
 /// that runs until the end of `concrete_job`, showing that it is processing
-pub fn start_spinner<T>(concrete_job: Box<dyn FnOnce() -> T>) -> T {
+pub fn start_spinner<T, F>(concrete_job: F) -> T
+where
+    F: FnOnce() -> T,
+{
     // Start the concrete job and in another thread, run the spinner
     // When concrete job finishes, call join on the spinner-thread
 
