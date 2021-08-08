@@ -6,12 +6,12 @@ use std::iter;
 ///
 /// # Example:
 /// ```
-/// let mut progress = ProgressBar::new(1000, 15);
-/// progress.set_title("Amount of work done");
-/// for _ in range(0..1000) {
+/// let mut progress = terminal_toys::ProgressBar::new(1000, 15);
+/// progress.title("Amount of work done");
+/// for _ in 0..1000 {
 ///     // -- do work --
 ///
-///     progress.print_update()?;
+///     progress.print_update();
 ///     // Example of output when looped 400 to 499 times:
 ///     // Amount of work done: [====......]
 /// }

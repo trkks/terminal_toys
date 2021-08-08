@@ -5,9 +5,11 @@ use std::thread;
 
 pub mod snake;
 pub mod progress_bar;
+pub mod smargs;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
+pub use smargs::Smargs;
 
 /// Starts a spinner animation at the current terminal print position
 /// that runs until the end of `concrete_job`, showing that it is processing
