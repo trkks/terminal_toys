@@ -1,5 +1,6 @@
 use terminal_toys::{ProgressBar, start_spinner};
 
+
 fn main() {
     progressbar_thread_test();
     spinner_test();
@@ -31,27 +32,36 @@ fn spinner_test() {
 fn progressbar_thread_test() {
     let n = 10_000_000;
     let threads = 10;
-    // Clear terminal 
-    println!("\x1b[2J");
+
+    // Print room down for the progressbars
+    for _ in 0..threads {
+        println!();
+    }
+    // Move back to top
+    println!("\x1b[{}A", threads + 1);
+
     
+    // Visualize some progress in multiple threads with different length bars
     let mut handles = vec![];
     for i in 0..threads {
         let mut pb1 = ProgressBar::new(n, 5 * (i + 1));
-        pb1.title(&format!("Thread #{}", i));
+        pb1.title(&format!("Thread #{}", i + 1));
         handles.push(
             std::thread::spawn(move || {
+                pb1.row(i + 1);
                 for _ in 0..n {
-                    pb1.print_update_row(i + 1).unwrap();
+                    pb1.print_update().unwrap();
                 }
             })
         );
     }
+
 
     // Join all threads
     for handle in handles.into_iter() {
         handle.join().unwrap(); 
     }
 
-    // Move back to bottom row
-    println!("\x1b[{};0f", threads);
+    // Move to bottom of all progress bars
+    println!("\x1b[{}B", threads);
 }

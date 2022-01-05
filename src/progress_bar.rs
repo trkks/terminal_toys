@@ -21,6 +21,7 @@ pub struct ProgressBar {
     threshold: usize,
     bar: Vec<u8>,
     title: String,
+    row: usize,
     out: Stdout,
 }
 impl ProgressBar {
@@ -36,37 +37,33 @@ impl ProgressBar {
             threshold: source_len / bar_len,
             bar,
             title: String::from("Progress"),
+            row: 0,
             out: io::stdout(),
         }
     }
 
     /// Signal that progress has been made. If this update leads to filling up
     /// the bar, it is printed to stdout for reflecting this new state
+    /// Note that the environment must follow some ANSI escape sequences (see
+    /// https://tldp.org/HOWTO/Bash-Prompt-HOWTO/x361.html).
     pub fn print_update(&mut self) -> IOResult<()> {
         if self.update() {
-            self.print(None)?
+            self.print()?
         }
         Ok(())
     }
-
-    /// Same as `print_update` but specify the terminal row to which position
-    /// the bar.
-    /// Note that the environment must follow some ANSI escape sequences (see 
-    /// https://tldp.org/HOWTO/Bash-Prompt-HOWTO/x361.html).
-    pub fn print_update_row(&mut self, row: usize) -> IOResult<()> {
-        if self.update() {
-            self.print(Some(row))?
-        }
-        Ok(())
-    }
-
 
     /// Change the title shown next to the progress bar
     pub fn title(&mut self, title: &str) {
         self.title = String::from(title);
     }
 
-    fn update(&mut self) -> bool{
+    /// Change the row-offset of the progress bar
+    pub fn row(&mut self, row: usize) {
+        self.row = row;
+    }
+
+    fn update(&mut self) -> bool {
         // Source has implied a state update, so increment progress
         self.source_progress += 1;
         if self.source_progress % self.threshold == 0 {
@@ -79,13 +76,19 @@ impl ProgressBar {
         return false
     }
 
-    fn print(&mut self, row: Option<usize>) -> IOResult<()> {
-        // Choose current prefix based on if cursor should be moved to a row
-        let prefix = match row {
-            Some(r) => format!("\x1b[{};0f\r{} [", r, self.title),
-            None    => format!("\r{} [", self.title),
+    /// Print based on terminal row on which to position the bar.
+    fn print(&mut self) -> IOResult<()> {
+        // Set how much the cursor will be moved with escape sequences
+        let move_rows = format!("\x1b[{}", self.row);
+        // Do a little dance, make a little love
+        let prefix = {
+            let mut temp = Vec::from(move_rows.as_bytes());
+            // 'B' => Move down n lines
+            temp.extend(b"B\r");
+            temp.extend(self.title.as_bytes());
+            temp.extend(b" [");
+            temp
         };
-        let prefix = prefix.as_bytes();
 
         // Flag to choose the right suffix based on the bar being full or not
         let bar_progress = self.bar.iter()
@@ -106,6 +109,9 @@ impl ProgressBar {
         } else {
             bytes.extend(b"]")
         }
+
+        // Move back up ('A') to the row where started
+        bytes.extend(format!("{}A", move_rows).as_bytes());
 
         // Write into stdout
         // NOTE Stdout needs to be locked for the write operations
