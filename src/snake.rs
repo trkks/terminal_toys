@@ -1,6 +1,7 @@
 use std::thread;
 use std::time;
 use std::sync::{Arc, Mutex, mpsc};
+use std::io::Write;
 
 pub fn play() {
     let (input_sender, input_receiver) = mpsc::channel();
@@ -53,7 +54,7 @@ impl InputHandler {
                     break;
                 }
             } else if let Err(_) = input_sender.send(input) {
-                break; 
+                break;
             }
         });
 
@@ -71,6 +72,10 @@ impl LogicHandler {
         let mut snake = vec![V2 { x: 5, y: 5}, V2 { x: 6, y: 5}];
         let mut apple = V2 { x: 9, y: 3 };
         let mut dir = V2 { x: 0, y: -1 };
+        let horizontal_edge = String::from_utf8(
+            std::iter::repeat('#' as u8).take(W + 2).collect::<Vec<u8>>()
+        )
+        .unwrap();
         let logic_handle = thread::spawn(move || loop {
             if let Ok(_) = quit_rec.lock().unwrap().try_recv() {
                 break;
@@ -84,6 +89,7 @@ impl LogicHandler {
                 Input::Down  => dir = V2 { x: 0, y: 1 },
                 Input::Left  => dir = V2 { x:-1, y: 0 },
                 Input::Right => dir = V2 { x: 1, y: 0 },
+                // TODO Set head to LAST (reversed) from some input?
                 _            => { },
             };
 
@@ -96,7 +102,7 @@ impl LogicHandler {
                 else if H as i32 <= new_p.y { new_p.y = 0;            }
                 new_p
             };
-            
+
             for i in 1..snake.len() {
                 let temp = snake[i];
                 snake[i] = last_head;
@@ -108,7 +114,7 @@ impl LogicHandler {
                 apple.x = (rand::random::<f32>() * W as f32) as i32;
                 apple.y = (rand::random::<f32>() * H as f32) as i32;
             }
-            
+
             for i in 0..W*H {
                 board[i] = '.';
             }
@@ -117,24 +123,34 @@ impl LogicHandler {
                 .skip(1)
                 .for_each(|p| board[(p.y * W as i32 + p.x) as usize] = 'S');
             board[(apple.y * W as i32 + apple.x) as usize] = 'A';
-            let horizontal_edge = {
-                let x = std::iter::repeat('#' as u8)
-                    .take(W + 2)
-                    .collect::<Vec<u8>>();
-                String::from_utf8(x).unwrap()
-            };
-            print!("\x1b[2J"); 
-            print!("\x1b[0;0H{}\n", horizontal_edge);
+
+            let mut view = String::with_capacity(board.len() + W * 2 + H * 3);
             for line in board.chunks(W) {
-                let l = line.iter().map(|c| *c as u8).collect::<Vec<u8>>();
-                println!("#{}#", String::from_utf8(l).unwrap());
+                view.push('#');
+                line.iter().for_each(|&c| view.push(c));
+                view.push('#');
+                view.push('\n');
             }
-            println!("{}", horizontal_edge);
+
+            {
+                let stdout = std::io::stdout();
+                let mut stdout_handle = stdout.lock();
+                let _ = stdout_handle.write(
+                    format!(
+                        "\x1b[2J\x1b[0;0H{}\n{}{}",
+                        horizontal_edge,
+                        view,
+                        horizontal_edge,
+                    )
+                    .as_bytes()
+                );
+                let _ = stdout_handle.flush();
+            }
 
             let snake_ate_self = snake[1..].iter()
                 .any(|p| p.x == snake[0].x && p.y == snake[0].y);
             if snake_ate_self {
-                println!("GAME OVER. ([RETURN] to quit)");
+                println!("\nGAME OVER. ([RETURN] to quit)");
                 quit_sender.lock().unwrap().send(()).unwrap();
                 break;
             }
