@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::iter;
 use std::ops;
 
+// TODO Enable '-abc' for matching '-a' '-b' and '-c' simultaneously
+// TODO Parse options from some parameters eg. [Bool("-v", "--verbose", "Print
+// detailed information"), String("-p", "--path", "Path to source file"), ...]
+// smargs = Smargs::new(options_list, env::args())
 /// SiMpler thAn wRiting it once aGain Surely :)
 /// PlaceS strings received froM std::env::ARGS into Suitable structures for
 /// straightforward operation of flags, ordered and naMed ARGumentS.
@@ -41,17 +45,22 @@ use std::ops;
 ///     },
 /// }
 /// ```
+#[derive(Debug, PartialEq, Eq)]
 pub struct Smargs {
     exe: String,
     list: Vec<String>,
     dict: HashMap<String, usize>,
 }
 impl Smargs {
-    pub fn new(mut args: impl Iterator<Item = String>) -> Self {
-        let exe = args.next().unwrap();
+    pub fn new<'a>(
+        mut args: impl Iterator<Item = String>,
+    ) -> Result<Self, SmargsError<'a>> {
+        let exe = args.next().ok_or(SmargsError::Empty)?;
         let list: Vec<String> =
             // Hide a "boolean" to last index
-            args.chain(iter::once(true.to_string())).collect();
+            args.chain(iter::once(true.to_string()))
+                .filter(|x| !x.is_empty())
+                .collect();
         let dict = list.windows(2)
             .enumerate()
             .filter_map(|(i, x)|
@@ -64,7 +73,12 @@ impl Smargs {
             )
             .collect();
 
-        Smargs { list, dict, exe }
+        Ok(Smargs { list, dict, exe })
+    }
+
+    /// Creates `Smargs` from a call to `std::env::args`.
+    pub fn from_env<'a>() -> Result<Self, SmargsError<'a>> {
+        Self::new(std::env::args())
     }
 
     pub fn exe(&self) -> &String {
@@ -141,15 +155,23 @@ impl ops::Index<ops::RangeTo<usize>> for Smargs {
     }
 }
 
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SmargsError<'a> {
+    Empty,
+    Duplicate(&'a str),
+}
+
+
 #[cfg(test)]
 mod tests {
-    use super::Smargs;
+    use super::{Smargs, SmargsError};
     #[test]
-    fn test_smargs() {
+    fn test_smargs_use_case() {
         let smargs = Smargs::new(
-            "scale_img.exe nn --verbose -w 300 -h 95 --output scaled.png"
+            "scale_img.exe nn --verbose   -w 300 -h 95  --output scaled.png"
                 .split(' ').map(String::from)
-        );
+        ).unwrap();
 
         let indexable_args = vec![
             "nn", "--verbose", "-w", "300",
@@ -182,41 +204,79 @@ mod tests {
         assert_eq!(smargs.first(), Some(&smargs[0]));
         assert_eq!(smargs.first(), Some(&String::from("nn")));
         assert_eq!(smargs.last(), Some(&String::from("scaled.png")));
+    }
 
-        let smargs = Smargs::new("foo.exe".split(' ').map(String::from));
-        assert_eq!(smargs.first(), None);
-        assert_eq!(smargs.last(), None);
-
-        let smargs = Smargs::new("foo.exe bar".split(' ').map(String::from));
+    #[test]
+    fn test_smargs_first_last() {
+        let args = "foo.exe bar".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
         assert_eq!(smargs.first(), Some(&String::from("bar")));
         assert_eq!(smargs.last(), Some(&String::from("bar")));
     }
 
     #[test]
+    fn test_smargs_exe() {
+        let args = "foo.exe".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
+        assert_eq!(smargs.first(), None);
+        assert_eq!(smargs.last(), None);
+        assert_eq!(smargs.exe(), &String::from("foo.exe"));
+    }
+
+    #[test]
+    fn test_smargs_duplicates() {
+        let args = "some.exe -foo".split(' ').map(String::from);
+        let double_short = Smargs::new(args);
+        assert_eq!(double_short, Err(SmargsError::Duplicate("o")));
+
+        let args = "some.exe --foo --foo --bar --bar".split(' ')
+            .map(String::from);
+        let double_long = Smargs::new(args);
+        assert_eq!(double_long, Err(SmargsError::Duplicate("foo")));
+
+        let args = "some.exe -bar --bar".split(' ').map(String::from);
+        let diff_types = Smargs::new(args).unwrap();
+        assert_eq!(diff_types["b"].parse::<bool>().unwrap(), true);
+        assert_eq!(diff_types["a"].parse::<bool>().unwrap(), true);
+        assert_eq!(diff_types["r"].parse::<bool>().unwrap(), true);
+        assert_eq!(diff_types["bar"].parse::<bool>().unwrap(), true);
+    }
+
+    #[test]
+    fn test_smargs_empty() {
+        let smargs = Smargs::new(std::iter::empty());
+        assert_eq!(smargs, Err(SmargsError::Empty));
+    }
+
+    #[test]
     #[should_panic]
     fn test_smargs_empty_key() {
-        let smargs = Smargs::new("some.exe foo".split(' ').map(String::from));
+        let args = "some.exe foo".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
         let _ = smargs[""];
     }
 
     #[test]
     #[should_panic]
     fn test_smargs_not_a_key() {
-        let smargs = Smargs::new("some.exe foo bar".split(' ').map(String::from));
+        let args = "some.exe foo bar".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
         let _ = smargs["foo"];
     }
 
     #[test]
     #[should_panic]
     fn test_smargs_index_out_of_bounds() {
-        let smargs = Smargs::new("some.exe foo bar".split(' ').map(String::from));
+        let args = "some.exe foo bar".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
         let _ = smargs[2];
     }
 
     #[test]
     #[should_panic]
     fn test_smargs_range_out_of_bounds() {
-        let smargs = Smargs::new("some.exe foo bar".split(' ').map(String::from));
+        let args = "some.exe foo bar".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
         let _ = smargs[0..3];
     }
 }
