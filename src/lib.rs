@@ -113,3 +113,21 @@ macro_rules! color_println {
         println!();
     };
 }
+
+/// Log a message from module `x` IF an environment variable `TTOYSLOG` has
+/// been set to contain a name associated with path of the module `x`.
+///
+/// # Examples of modules to be logged from and their names
+/// - `crate::foo::bar    => bar`
+/// - `crate::baz::qux::* => baz`
+#[macro_export]
+macro_rules! log {
+    ($($message:expr),+) => {
+        if let Some(value) = option_env!("TTOYSLOG") {
+            if module_path!().split("::").any(|m| value.contains(m)) {
+                // Print message with its formatting
+                println!($($message),+);
+            }
+        }
+    };
+}
