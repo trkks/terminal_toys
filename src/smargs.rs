@@ -2,9 +2,17 @@ use std::collections::HashMap;
 use std::iter;
 use std::ops;
 
-// TODO Enable '-abc' for matching '-a' '-b' and '-c' simultaneously
+
+/// Makes handling the args -strings a bit clearer
+#[derive(Debug, PartialEq, Clone)]
+pub enum Token {
+    Value(String),
+    Flag(char),
+    Word(String),
+}
+
 // TODO Parse options from some parameters eg. [Bool("-v", "--verbose", "Print
-// detailed information"), String("-p", "--path", "Path to source file"), ...]
+// detailed information"), OsPath("-p", "--path", "Path to source file"), ...]
 // smargs = Smargs::new(options_list, env::args())
 /// SiMpler thAn wRiting it once aGain Surely :)
 /// PlaceS strings received froM std::env::ARGS into Suitable structures for
@@ -14,7 +22,7 @@ use std::ops;
 /// ```
 /// let smargs = terminal_toys::Smargs::new(
 ///     "tupletize.exe -v --amount 3 foo".split(' ').map(String::from)
-/// );
+/// ).unwrap();
 ///
 /// let target = smargs.last().expect("Specify target as the last argument");
 /// let n: usize = smargs["amount"].parse().expect("Amount not an integer");
@@ -34,7 +42,7 @@ use std::ops;
 /// ```
 /// let smargs = terminal_toys::Smargs::new(
 ///     "tupletize.exe 3 foo -v".split(' ').map(String::from)
-/// );
+/// ).unwrap();
 /// match &smargs[..2] {
 ///     []  => { /* Print instructions */ },
 ///     [n] => { /* ... */},
@@ -52,32 +60,101 @@ pub struct Smargs {
     dict: HashMap<String, usize>,
 }
 impl Smargs {
-    pub fn new<'a>(
+    pub fn new(
         mut args: impl Iterator<Item = String>,
-    ) -> Result<Self, SmargsError<'a>> {
+    ) -> Result<Self, SmargsError> {
         let exe = args.next().ok_or(SmargsError::Empty)?;
+
+        // Contains the original arguments without empty ones
+        // TODO parse into typed enums
         let list: Vec<String> =
-            // Hide a "boolean" to last index
-            args.chain(iter::once(true.to_string()))
-                .filter(|x| !x.is_empty())
+            args.filter_map(|x| {
+                    let xx = String::from(x.trim());
+                    if xx.is_empty() { None } else { Some(xx) }
+                })
+                // Hide a "boolean" to last index
+                .chain(iter::once(true.to_string()))
                 .collect();
-        let dict = list.windows(2)
-            .enumerate()
-            .filter_map(|(i, x)|
-                // Windows (always) has n elements per slice so indexing is ok
-                x[0].starts_with('-').then(|| (
-                    x[0].trim_start_matches('-').to_string(),
-                    // Options point at next index, flags at "boolean" in last
-                    if x[1].starts_with('-') { list.len() - 1 } else { i + 1 }
-                ))
+
+        // Tokenize
+        let mut tokens = Vec::with_capacity(list.len());
+        for s in list.iter().take(list.len() - 1) {
+            if s.starts_with("--") {
+                tokens.push(Token::Word(s.chars().skip(2).collect()));
+            } else if s.starts_with("-") {
+                tokens.extend(
+                    s.chars()
+                        .skip(1)
+                        .map(|c| Token::Flag(c))
+                );
+            } else {
+                tokens.push(Token::Value(String::from(s)));
+            }
+        }
+        // Check that no duplicates were added
+        for i in 0..tokens.len() {
+            // `Value`s can be duplicates
+            if let Token::Value(_) = tokens[i] {
+                continue;
+            }
+            for j in i + 1.. tokens.len() {
+                if tokens[i] == tokens[j] {
+                    return Err(
+                        SmargsError::Duplicate(tokens[i].clone())
+                    );
+                }
+            }
+        }
+
+        // NOTE HACK to have windows(2) handle every actual arg as "key"
+        tokens.push(Token::Flag(0 as char));
+
+        // Enumerate but with original indices ie. combined flags as one item
+        // When parsing a pattern like
+        //   "exe -bar baz"
+        // the offsets refer to the first flag ie.
+        // bar+1 == b+0+1 == a+1+1 == r+2+1 == baz)
+        let enumeration = tokens.iter()
+            .scan((false, 0), |(prev_was_flag, i), x| {
+                // Eww c):
+                if let Token::Flag(_) = x {
+                    if !*prev_was_flag {
+                        *prev_was_flag = true;
+                        *i += 1;
+                    }
+                } else {
+                    *prev_was_flag = false;
+                    *i += 1;
+                }
+                Some(*i - 1)
+            });
+
+        // Figure out the key-value -pairs; Flags and Words without following
+        // values point to the true-string (ie. they map to a boolean)
+        // TODO Use scan(Some) to remember previous arg and not use windows(2)?
+        let dict = enumeration.zip(tokens.windows(2))
+            .filter_map(|(i, pair)|
+                match &pair[0] {
+                    Token::Flag(chr) => Some(chr.to_string()),
+                    Token::Word(s)   => Some(s.clone()),
+                    _ => None,
+                }
+                .zip(Some(if let Token::Value(_) = pair[1] {
+                    // Point at the following arg, which is the pair's value
+                    i + 1
+                } else {
+                    // Point at the true-string
+                    list.len() - 1
+                }))
             )
+            .inspect(|x| println!("{:?}", x))
             .collect();
 
         Ok(Smargs { list, dict, exe })
     }
 
     /// Creates `Smargs` from a call to `std::env::args`.
-    pub fn from_env<'a>() -> Result<Self, SmargsError<'a>> {
+    pub fn from_env() -> Result<Self, SmargsError> {
         Self::new(std::env::args())
     }
 
@@ -156,26 +233,28 @@ impl ops::Index<ops::RangeTo<usize>> for Smargs {
 }
 
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum SmargsError<'a> {
+/// `SmargsError::Duplicate` can be used to tell the caller which argument was
+/// a duplicate and its token-type.
+#[derive(Debug, PartialEq)]
+pub enum SmargsError {
     Empty,
-    Duplicate(&'a str),
+    Duplicate(Token),
 }
 
 
 #[cfg(test)]
 mod tests {
-    use super::{Smargs, SmargsError};
+    use super::{Smargs, SmargsError, Token};
     #[test]
     fn test_smargs_use_case() {
         let smargs = Smargs::new(
-            "scale_img.exe nn --verbose   -w 300 -h 95  --output scaled.png"
+            "scale_img.exe nn --verbose   -w 300 -h 300  --output scaled.png"
                 .split(' ').map(String::from)
         ).unwrap();
 
         let indexable_args = vec![
             "nn", "--verbose", "-w", "300",
-            "-h", "95", "--output", "scaled.png",
+            "-h", "300", "--output", "scaled.png",
         ];
 
         assert_eq!(smargs[0], indexable_args[0]);
@@ -187,6 +266,8 @@ mod tests {
         assert_eq!(smargs[6], indexable_args[6]);
         assert_eq!(smargs[7], indexable_args[7]);
 
+        // TODO Is this functionality even useful?
+        // Is supporting the original arg-list necessary?
         assert_eq!(smargs[..], smargs[0..]);
         assert_eq!(smargs[0..], smargs[..8]);
         assert_eq!(smargs[..8], smargs[0..8]);
@@ -195,7 +276,7 @@ mod tests {
         assert_eq!(smargs[2..6], indexable_args[2..6]);
         assert_eq!(smargs[3..3], indexable_args[3..3]);
 
-        assert_eq!(smargs["h"], "95");
+        assert_eq!(smargs["h"], "300");
         assert_eq!(smargs["w"], "300");
         assert_eq!(smargs["output"], "scaled.png");
         assert_eq!(smargs["verbose"], "true");
@@ -225,22 +306,35 @@ mod tests {
 
     #[test]
     fn test_smargs_duplicates() {
-        let args = "some.exe -foo".split(' ').map(String::from);
-        let double_short = Smargs::new(args);
-        assert_eq!(double_short, Err(SmargsError::Duplicate("o")));
+        let args = "some.exe -fofo".split(' ').map(String::from);
+        let double_flag = Smargs::new(args);
+        // Catch the first duplicate that appeared from left to right
+        assert_eq!(
+            double_flag,
+            Err(SmargsError::Duplicate(Token::Flag('f')))
+        );
 
         let args = "some.exe --foo --foo --bar --bar".split(' ')
             .map(String::from);
-        let double_long = Smargs::new(args);
-        assert_eq!(double_long, Err(SmargsError::Duplicate("foo")));
+        let double_word = Smargs::new(args);
+        assert_eq!(
+            double_word,
+            Err(SmargsError::Duplicate(Token::Word(String::from("foo"))))
+        );
+    }
 
-        let args = "some.exe -bar --bar".split(' ').map(String::from);
+    #[test]
+    fn test_combined_key_value() {
+        let args = "some.exe -bar r-arg-value --bar"
+            .split(' ')
+            .map(String::from);
         let diff_types = Smargs::new(args).unwrap();
         assert_eq!(diff_types["b"].parse::<bool>().unwrap(), true);
         assert_eq!(diff_types["a"].parse::<bool>().unwrap(), true);
-        assert_eq!(diff_types["r"].parse::<bool>().unwrap(), true);
+        assert_eq!(diff_types["r"], "r-arg-value");
         assert_eq!(diff_types["bar"].parse::<bool>().unwrap(), true);
     }
+
 
     #[test]
     fn test_smargs_empty() {
