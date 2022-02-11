@@ -76,79 +76,68 @@ impl Smargs {
                 .chain(iter::once(true.to_string()))
                 .collect();
 
-        // Tokenize
+        // Tokenize and enumerate with original indices (ie. flag groups like
+        // "-bar" count as one index)
+        // NOTE that the added boolean in last index is also tokenized so that
+        // the next dict-loop wraps up nicely
         let mut tokens = Vec::with_capacity(list.len());
-        for s in list.iter().take(list.len() - 1) {
+        for (i, s) in list.iter().enumerate() {
             if s.starts_with("--") {
-                tokens.push(Token::Word(s.chars().skip(2).collect()));
+                tokens.push(
+                    (i, Token::Word(s.chars().skip(2).collect()))
+                );
             } else if s.starts_with("-") {
+                // Possible flag group
                 tokens.extend(
                     s.chars()
                         .skip(1)
-                        .map(|c| Token::Flag(c))
+                        .map(|c| (i, Token::Flag(c)))
                 );
             } else {
-                tokens.push(Token::Value(String::from(s)));
-            }
-        }
-        // Check that no duplicates were added
-        for i in 0..tokens.len() {
-            // `Value`s can be duplicates
-            if let Token::Value(_) = tokens[i] {
-                continue;
-            }
-            for j in i + 1.. tokens.len() {
-                if tokens[i] == tokens[j] {
-                    return Err(
-                        SmargsError::Duplicate(tokens[i].clone())
-                    );
-                }
+                tokens.push(
+                    (i, Token::Value(String::from(s)))
+                );
             }
         }
 
-        // NOTE HACK to have windows(2) handle every actual arg as "key"
-        tokens.push(Token::Flag(0 as char));
+        let mut dict = HashMap::with_capacity(tokens.len());
+        // Emulate old school for-loop because Rust is so expressive /s
+        let mut i = 0;
+        while i < tokens.len().saturating_sub(1) {
+            let current_token = &tokens[i].1;
+            let (k, next_token) = &tokens[i + 1];
 
-        // Enumerate but with original indices ie. combined flags as one item
-        // When parsing a pattern like
-        //   "exe -bar baz"
-        // the offsets refer to the first flag ie.
-        // bar+1 == b+0+1 == a+1+1 == r+2+1 == baz)
-        let enumeration = tokens.iter()
-            .scan((false, 0), |(prev_was_flag, i), x| {
-                // Eww c):
-                if let Token::Flag(_) = x {
-                    if !*prev_was_flag {
-                        *prev_was_flag = true;
-                        *i += 1;
-                    }
+            // Check if left side of pair is a key
+            let kv_opt = match current_token {
+                Token::Flag(chr) => Some(chr.to_string()),
+                Token::Word(s)   => Some(s.clone()),
+                _ => None,
+            }
+            // If it was, it will map to a value in resulting dict
+            .zip(Some(
+                if let Token::Value(_) = next_token {
+                    // Do not check if this Value is a key next iteration
+                    // This is literally the only reason for not using for-loop
+                    i += 1;
+                    // Point at the following Value in the original list
+                    *k
                 } else {
-                    *prev_was_flag = false;
-                    *i += 1;
-                }
-                Some(*i - 1)
-            });
-
-        // Figure out the key-value -pairs; Flags and Words without following
-        // values point to the true-string (ie. they map to a boolean)
-        // TODO Use scan(Some) to remember previous arg and not use windows(2)?
-        let dict = enumeration.zip(tokens.windows(2))
-            .filter_map(|(i, pair)|
-                match &pair[0] {
-                    Token::Flag(chr) => Some(chr.to_string()),
-                    Token::Word(s)   => Some(s.clone()),
-                    _ => None,
-                }
-                .zip(Some(if let Token::Value(_) = pair[1] {
-                    // Point at the following arg, which is the pair's value
-                    i + 1
-                } else {
-                    // Point at the true-string
+                    // Key without following value points to the boolean
                     list.len() - 1
-                }))
-            )
-            .inspect(|x| println!("{:?}", x))
-            .collect();
+                }
+            ));
+
+            // Insert into dict and Err if key was already found
+            if let Some((key, value)) = kv_opt {
+                if let Some(_value) = dict.insert(key, value) {
+                    return Err(
+                        SmargsError::Duplicate(current_token.clone())
+                    )
+                }
+            }
+
+            i += 1;
+        }
 
         Ok(Smargs { list, dict, exe })
     }
@@ -308,7 +297,7 @@ mod tests {
     fn test_smargs_duplicates() {
         let args = "some.exe -fofo".split(' ').map(String::from);
         let double_flag = Smargs::new(args);
-        // Catch the first duplicate that appeared from left to right
+        // Catch the first duplicate that appears from left to right
         assert_eq!(
             double_flag,
             Err(SmargsError::Duplicate(Token::Flag('f')))
@@ -320,6 +309,14 @@ mod tests {
         assert_eq!(
             double_word,
             Err(SmargsError::Duplicate(Token::Word(String::from("foo"))))
+        );
+
+        let args = "some.exe -fo -of --bar --bar".split(' ')
+            .map(String::from);
+        let double_flag = Smargs::new(args);
+        assert_eq!(
+            double_flag,
+            Err(SmargsError::Duplicate(Token::Flag('o')))
         );
     }
 
@@ -333,6 +330,16 @@ mod tests {
         assert_eq!(diff_types["a"].parse::<bool>().unwrap(), true);
         assert_eq!(diff_types["r"], "r-arg-value");
         assert_eq!(diff_types["bar"].parse::<bool>().unwrap(), true);
+
+        let args = "some.exe -bar --verbose -f 4.2"
+            .split(' ')
+            .map(String::from);
+        let multiple = Smargs::new(args).unwrap();
+        assert_eq!(multiple["b"].parse::<bool>().unwrap(), true);
+        assert_eq!(multiple["a"].parse::<bool>().unwrap(), true);
+        assert_eq!(multiple["r"].parse::<bool>().unwrap(), true);
+        assert_eq!(multiple["verbose"].parse::<bool>().unwrap(), true);
+        assert_eq!(multiple["f"].parse::<f32>().unwrap(), 4.2);
     }
 
 
