@@ -2,3 +2,4 @@
 *.lock
 *.swp
 *.txt
+/src/bin/main.rs

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::iter;
 use std::ops;
+use std::str;
 
 
 /// Makes handling the args -strings a bit clearer
@@ -20,12 +21,18 @@ pub enum Token {
 ///
 /// # Example:
 /// ```
+/// use terminal_toys::smargs::GetError as Ge;
+///
 /// let smargs = terminal_toys::Smargs::new(
 ///     "tupletize.exe -v --amount 3 foo".split(' ').map(String::from)
 /// ).unwrap();
 ///
 /// let target = smargs.last().expect("Specify target as the last argument");
-/// let n: usize = smargs["amount"].parse().expect("Amount not an integer");
+/// let n: usize = match smargs.get("amount") {
+///     Err(Ge::NotFound)      => panic!("Missing argument"),
+///     Err(Ge::ParseError(e)) => panic!("Failed to parse: {:?}", e),
+///     Ok(m) => m,
+/// };
 /// let mut result = String::from("()");
 /// if n > 0 {
 ///     result = format!("({})", vec![String::from(target); n].join(", "));
@@ -166,8 +173,13 @@ impl Smargs {
         self.list[..self.list.len() - 1].last()
     }
 
-    pub fn get(&self, key: &str) -> Option<&String> {
-        self.dict.get(key).map(|&i| self.list.get(i)).flatten()
+    pub fn get<T: str::FromStr>(&self, key: &str) -> GetResult<T> {
+        self.dict.get(key)
+            .map(|&i| self.list.get(i))
+            .flatten()
+            .ok_or(GetError::NotFound)?
+            .parse::<T>()
+            .map_err(|e| GetError::ParseError(e))
     }
 
     pub fn has(&self, key: &str) -> bool {
@@ -229,6 +241,14 @@ pub enum SmargsError {
     Empty,
     Duplicate(Token),
 }
+
+
+/// Error used for getting and parsing a value with `Smargs::get`
+pub enum GetError<T: str::FromStr> {
+    NotFound,
+    ParseError(<T as str::FromStr>::Err),
+}
+type GetResult<T> = Result<T, GetError<T>>;
 
 
 #[cfg(test)]
