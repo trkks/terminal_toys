@@ -9,8 +9,7 @@ use std::thread;
 /// # Example:
 /// ```
 /// let result = terminal_toys::spinner::start_spinner(||
-///     (u32::MAX - std::iter::repeat(1).take(94967295).sum::<u32>())
-///     / 10_0000_000
+///     std::iter::repeat(2).take(20).fold(44040192, |acc, x| acc / x)
 /// );
 /// // (The spinner spins at the end of the line while computing the result)
 /// assert_eq!(result, 42);
