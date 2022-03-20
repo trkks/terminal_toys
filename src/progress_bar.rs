@@ -6,15 +6,43 @@ use std::iter;
 ///
 /// # Example:
 /// ```
-/// let mut progress = terminal_toys::ProgressBar::new(1000, 15);
-/// progress.title("Amount of work done");
+/// let mut bar = terminal_toys::ProgressBar::new(1000, 20);
+/// bar.title("Amount of work done");
 /// for _ in 0..1000 {
 ///     // -- do work --
 ///
-///     progress.print_update();
+///     bar.ulap();
 ///     // Example of output when looped 400 to 499 times:
 ///     // Amount of work done: [====......]
 /// }
+/// ```
+/// # Showing progress from simultaneous processes:
+/// ```
+/// // Count to 1000 in 4 threads
+/// let mut threads = vec![];
+/// let titles = ["foo", "bar", "baz", "qux"];
+/// for (i, mut bar)
+///     in terminal_toys::ProgressBar::multiple(1000, 5, 4)
+///         .into_iter()
+///         .enumerate()
+/// {
+///     threads.push(std::thread::spawn(move || {
+///         let mut k = 0;
+///         bar.title(titles[i]);
+///         for _ in 0..250 { k += 1; bar.ulap(); }
+///         k
+///     }));
+/// }
+/// // Example of output:
+/// // foo [====] Done!
+/// // bar [====] Done!
+/// // baz [===.]
+/// // qux [===.]
+/// let mut result = 0;
+/// for thread in threads { result += thread.join().unwrap(); }
+/// assert_eq!(1000, result);
+/// // TODO Could this be more convenient?
+/// println!("\x1b[{}B", 4);
 /// ```
 pub struct ProgressBar {
     source_progress: usize,
@@ -48,15 +76,47 @@ impl ProgressBar {
         }
     }
 
+    /// Create multiple bars at once to represent parallel progress.
+    /// NOTE: This assumes __no other printing is done__ and automatically
+    /// creates space on the command line for rows of bars.
+    pub fn multiple(
+        source_len: usize,
+        bar_len: usize,
+        count: usize,
+    ) -> Vec<Self> {
+        let n = source_len / count;
+
+        // Print room down for the progressbars
+        for _ in 0..count {
+            println!();
+        }
+        // Move back up to where started
+        print!("\x1b[{}A", count + 1);
+
+        (0..count)
+            // Set the rows for bars in order
+            .map(|i| {
+                let mut pb = ProgressBar::new(n, bar_len);
+                pb.row(i + 1);
+                pb
+            })
+            .collect()
+    }
+
     /// Signal that progress has been made. If this update leads to filling up
     /// the bar, it is printed to stdout for reflecting this new state
     /// Note that the environment must follow some ANSI escape sequences (see
     /// https://tldp.org/HOWTO/Bash-Prompt-HOWTO/x361.html).
-    pub fn print_update(&mut self) -> IOResult<()> {
+    pub fn lap(&mut self) -> IOResult<()> {
         if self.update() {
             self.print()?
         }
         Ok(())
+    }
+
+    /// Unhandled lap. Same as `ProgressBar::lap` but ignores print failing.
+    pub fn ulap(&mut self) {
+        let _ = self.lap();
     }
 
     /// Change the title shown next to the progress bar

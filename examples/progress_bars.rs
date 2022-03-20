@@ -5,30 +5,23 @@ fn main() {
     let n = 10_000_000;
     let threads = 10;
 
-    // Print room down for the progressbars
-    for _ in 0..threads {
-        println!();
-    }
-    // Move back to top
-    print!("\x1b[{}A", threads + 1);
-
-
     // Visualize some progress in multiple threads with different length bars
     let mut handles = vec![];
-    for i in 0..threads {
-        let bar_len = 5 * (i + 1);
-        let mut pb1 = ProgressBar::new(n, bar_len);
-        pb1.title(&format!("Thread #{}, bar length {:>2}", i, bar_len));
-        pb1.row(i + 1);
-        handles.push(
-            std::thread::spawn(move || {
-                for _ in 0..n {
-                    pb1.print_update().unwrap();
-                }
-            })
-        );
+    for (i, mut bar)
+        in ProgressBar::multiple(n, 20, threads)
+            .into_iter()
+            .enumerate()
+    {
+        bar.title(&format!("Thread #{}", i));
+        handles.push(std::thread::spawn(move || {
+            let m = n / threads;
+            for j in 0..m {
+                let percent = j as f32 / m as f32 * 100.0;
+                bar.title(&format!("Thread #{} {:>3.0}%", i, percent));
+                bar.ulap();
+            }
+        }));
     }
-
 
     // Join all threads
     for handle in handles.into_iter() {
