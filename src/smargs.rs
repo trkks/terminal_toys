@@ -28,7 +28,7 @@ pub enum Token {
 /// ).unwrap();
 ///
 /// let target = smargs.last().expect("Specify target as the last argument");
-/// let n: usize = match smargs.get("amount") {
+/// let n: usize = match smargs.gets(&["amount", "a"]) {
 ///     Err(Ge::NotFound)      => panic!("Missing argument"),
 ///     Err(Ge::ParseError(e)) => panic!("Failed to parse: {:?}", e),
 ///     Ok(m) => m,
@@ -173,13 +173,17 @@ impl Smargs {
         self.list[..self.list.len() - 1].last()
     }
 
-    pub fn get<T: str::FromStr>(&self, key: &str) -> GetResult<T> {
-        self.dict.get(key)
-            .map(|&i| self.list.get(i))
-            .flatten()
-            .ok_or(GetError::NotFound)?
-            .parse::<T>()
-            .map_err(|e| GetError::ParseError(e))
+    pub fn gets<T: str::FromStr>(&self, keys: &[&str]) -> GetResult<T> {
+        for &key in keys {
+            if let Some(s)
+                = self.dict.get(key)
+                    .map(|&i| self.list.get(i))
+                    .flatten()
+            {
+                return s.parse::<T>().map_err(|e| GetError::ParseError(e))
+            }
+        }
+        return Err(GetError::NotFound)
     }
 
     pub fn has(&self, key: &str) -> bool {
