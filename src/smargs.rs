@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::iter;
 use std::ops;
 use std::str;
+use std::fmt;
 
 
 /// Makes handling the args -strings a bit clearer
@@ -173,7 +174,11 @@ impl Smargs {
         self.list[..self.list.len() - 1].last()
     }
 
-    pub fn gets<T: str::FromStr>(&self, keys: &[&str]) -> GetResult<T> {
+    pub fn gets<T>(&self, keys: &[&str]) -> GetResult<T>
+    where
+        T: str::FromStr,
+        <T as str::FromStr>::Err: fmt::Debug,
+    {
         for &key in keys {
             if let Some(s)
                 = self.dict.get(key)
@@ -248,10 +253,34 @@ pub enum SmargsError {
 
 
 /// Error used for getting and parsing a value with `Smargs::get`
-pub enum GetError<T: str::FromStr> {
+#[derive(Debug)]
+pub enum GetError<T>
+where
+    T: str::FromStr,
+    <T as str::FromStr>::Err: fmt::Debug,
+{
     NotFound,
     ParseError(<T as str::FromStr>::Err),
 }
+
+/// Implementing Display is needed for implementing std::error::Error.
+impl<T> fmt::Display for GetError<T>
+where
+    T: str::FromStr,
+    <T as str::FromStr>::Err: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        let msg = match self {
+            GetError::NotFound => String::from("GetError::NotFound"),
+            GetError::ParseError(err) => format!(
+                "GetError::ParseError({:?})",
+                err,
+            ),
+        };
+        write!(f, "{}", msg)
+    }
+}
+
 type GetResult<T> = Result<T, GetError<T>>;
 
 
