@@ -5,6 +5,104 @@ use std::str;
 use std::fmt;
 
 
+/// Error type for `Smargs`'s constructors.
+///
+/// `SmargsError::Duplicate` can be used to tell the caller which argument was
+/// a duplicate and its token-type.
+#[derive(Debug, PartialEq)]
+pub enum SmargsError {
+    Empty,
+    Duplicate(Token),
+}
+
+
+/// Offer nicer error-messages to user.
+/// Implementing `Display` is also needed for `std::error::Error`.
+impl fmt::Display for SmargsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        let msg = match self {
+            Self::Empty => String::from("No arguments found"),
+            // TODO impl Display for Token
+            Self::Duplicate(t) => format!("Duplicate entry of {:?}", t),
+        };
+        write!(f, "{}", msg)
+    }
+}
+
+
+/// Error type for getting and parsing the values of arguments.
+pub enum CollectError<T>
+where
+    T: str::FromStr,
+    <T as str::FromStr>::Err: fmt::Debug,
+{
+    NotFound { flags: Vec<char>, words: Vec<String> },
+    ParseError(<T as str::FromStr>::Err),
+}
+impl<T> CollectError<T>
+where
+    T: str::FromStr,
+    <T as str::FromStr>::Err: fmt::Debug,
+{
+    /// Create the NotFound-variant based on the argument keys passed in.
+    /// `CollectError` uses this function in creating a better error message.
+    ///
+    /// Example:
+    /// ```
+    /// use terminal_toys::smargs::{Smargs, CollectError as Ce};
+    /// let smargs = Smargs::new(
+    ///         "foo.exe -bar --baz".split(' ').map(String::from)
+    ///     ).unwrap();
+    /// let notfound_err_msg = smargs.gets::<i32>(&["output", "out", "o"])
+    ///     .unwrap_err()
+    ///     .to_string();
+    /// assert!(notfound_err_msg.contains("output"));
+    /// assert!(notfound_err_msg.contains("out"));
+    /// assert!(notfound_err_msg.contains("o"));
+    /// // TODO Position of the argument (in the order of the gets-query?).
+    /// ```
+    fn not_found(keys: &[&str]) -> Self {
+        let mut words = Vec::new();
+        let mut flags = Vec::new();
+        // TODO Could allocations be reduced by passing keys intelligentler?
+        for key in keys {
+            if key.len() == 1 {
+                flags.push(key.chars().next().unwrap());
+            } else if key.len() > 1 {
+                words.push(String::from(*key));
+            }
+        }
+        Self::NotFound { words, flags }
+    }
+}
+
+
+
+/// Offer nicer error-messages to user.
+/// Implementing `Display` is also needed for `std::error::Error`.
+impl<T> fmt::Display for CollectError<T>
+where
+    T: str::FromStr,
+    <T as str::FromStr>::Err: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        let msg = match self {
+            Self::NotFound { flags, words } => format!(
+                    "Option not found {}{}",
+                    flags.iter()
+                        .map(|c| format!(" -{}", c))
+                        .collect::<String>(),
+                    words.iter()
+                        .map(|s| format!(" --{}", s))
+                        .collect::<String>(),
+                ),
+            Self::ParseError(err) => format!("Bad format: {:?}", err),
+        };
+        write!(f, "{}", msg)
+    }
+}
+
+
 /// Makes handling the args -strings a bit clearer
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -244,102 +342,6 @@ impl ops::Index<ops::RangeTo<usize>> for Smargs {
     type Output = [String];
     fn index(&self, user_range: ops::RangeTo<usize>) -> &Self::Output {
         &self[0..user_range.end]
-    }
-}
-
-
-/// Error type for `Smargs`'s constructors.
-///
-/// `SmargsError::Duplicate` can be used to tell the caller which argument was
-/// a duplicate and its token-type.
-#[derive(Debug, PartialEq)]
-pub enum SmargsError {
-    Empty,
-    Duplicate(Token),
-}
-
-/// Offer nicer error-messages to user.
-/// Implementing `Display` is also needed for `std::error::Error`.
-impl fmt::Display for SmargsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let msg = match self {
-            Self::Empty => String::from("No arguments found"),
-            // TODO impl Display for Token
-            Self::Duplicate(t) => format!("Duplicate entry of {:?}", t),
-        };
-        write!(f, "{}", msg)
-    }
-}
-
-
-/// Error type for getting and parsing the values of arguments.
-pub enum CollectError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
-{
-    NotFound { flags: Vec<char>, words: Vec<String> },
-    ParseError(<T as str::FromStr>::Err),
-}
-
-/// Offer nicer error-messages to user.
-/// Implementing `Display` is also needed for `std::error::Error`.
-impl<T> fmt::Display for CollectError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let msg = match self {
-            Self::NotFound { flags, words } => format!(
-                    "Option not found {}{}",
-                    flags.iter()
-                        .map(|c| format!(" -{}", c))
-                        .collect::<String>(),
-                    words.iter()
-                        .map(|s| format!(" --{}", s))
-                        .collect::<String>(),
-                ),
-            Self::ParseError(err) => format!("Bad format: {:?}", err),
-        };
-        write!(f, "{}", msg)
-    }
-}
-
-impl<T> CollectError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
-{
-    /// Create the NotFound-variant based on the argument keys passed in.
-    /// `CollectError` uses this function in creating a better error message.
-    ///
-    /// Example:
-    /// ```
-    /// use terminal_toys::smargs::{Smargs, CollectError as Ce};
-    /// let smargs = Smargs::new(
-    ///         "foo.exe -bar --baz".split(' ').map(String::from)
-    ///     ).unwrap();
-    /// let notfound_err_msg = smargs.gets::<i32>(&["output", "out", "o"])
-    ///     .unwrap_err()
-    ///     .to_string();
-    /// assert!(notfound_err_msg.contains("output"));
-    /// assert!(notfound_err_msg.contains("out"));
-    /// assert!(notfound_err_msg.contains("o"));
-    /// // TODO Position of the argument (in the order of the gets-query?).
-    /// ```
-    fn not_found(keys: &[&str]) -> Self {
-        let mut words = Vec::new();
-        let mut flags = Vec::new();
-        // TODO Could allocations be reduced by passing keys intelligentler?
-        for key in keys {
-            if key.len() == 1 {
-                flags.push(key.chars().next().unwrap());
-            } else if key.len() > 1 {
-                words.push(String::from(*key));
-            }
-        }
-        Self::NotFound { words, flags }
     }
 }
 
