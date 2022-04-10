@@ -13,6 +13,7 @@ pub enum Token {
     Word(String),
 }
 
+
 // TODO Parse options from some parameters eg. [Bool("-v", "--verbose", "Print
 // detailed information"), OsPath("-p", "--path", "Path to source file"), ...]
 // smargs = Smargs::new(options_list, env::args())
@@ -22,7 +23,7 @@ pub enum Token {
 ///
 /// # Example:
 /// ```
-/// use terminal_toys::smargs::GetError as Ge;
+/// use terminal_toys::smargs::{Smargs, CollectError as Ce};
 ///
 /// let smargs = terminal_toys::Smargs::new(
 ///     "tupletize.exe -v --amount 3 foo".split(' ').map(String::from)
@@ -30,8 +31,8 @@ pub enum Token {
 ///
 /// let target = smargs.last().expect("Specify target as the last argument");
 /// let n: usize = match smargs.gets(&["amount", "a"]) {
-///     Err(Ge::NotFound)      => panic!("Missing argument"),
-///     Err(Ge::ParseError(e)) => panic!("Failed to parse: {:?}", e),
+///     Err(Ce::NotFound { .. }) => panic!("Missing argument"),
+///     Err(Ce::ParseError(e))   => panic!("Failed to parse: {:?}", e),
 ///     Ok(m) => m,
 /// };
 /// let mut result = String::from("()");
@@ -174,7 +175,11 @@ impl Smargs {
         self.list[..self.list.len() - 1].last()
     }
 
-    pub fn gets<T>(&self, keys: &[&str]) -> GetResult<T>
+    /// Return the matching value based on a list of keys.
+    // TODO Also keep a record of the order of calls to this (see
+    // GetsError::not_found) -> which would need the values to be removed from
+    // the smargs-instance.
+    pub fn gets<T>(&self, keys: &[&str]) -> Result<T, CollectError<T>>
     where
         T: str::FromStr,
         <T as str::FromStr>::Err: fmt::Debug,
@@ -185,10 +190,10 @@ impl Smargs {
                     .map(|&i| self.list.get(i))
                     .flatten()
             {
-                return s.parse::<T>().map_err(|e| GetError::ParseError(e))
+                return s.parse::<T>().map_err(|e| CollectError::ParseError(e))
             }
         }
-        return Err(GetError::NotFound)
+        return Err(CollectError::not_found(keys))
     }
 
     pub fn has(&self, key: &str) -> bool {
@@ -243,6 +248,8 @@ impl ops::Index<ops::RangeTo<usize>> for Smargs {
 }
 
 
+/// Error type for `Smargs`'s constructors.
+///
 /// `SmargsError::Duplicate` can be used to tell the caller which argument was
 /// a duplicate and its token-type.
 #[derive(Debug, PartialEq)]
@@ -251,37 +258,90 @@ pub enum SmargsError {
     Duplicate(Token),
 }
 
+/// Offer nicer error-messages to user.
+/// Implementing `Display` is also needed for `std::error::Error`.
+impl fmt::Display for SmargsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        let msg = match self {
+            Self::Empty => String::from("No arguments found"),
+            // TODO impl Display for Token
+            Self::Duplicate(t) => format!("Duplicate entry of {:?}", t),
+        };
+        write!(f, "{}", msg)
+    }
+}
 
-/// Error used for getting and parsing a value with `Smargs::get`
-#[derive(Debug)]
-pub enum GetError<T>
+
+/// Error type for getting and parsing the values of arguments.
+pub enum CollectError<T>
 where
     T: str::FromStr,
     <T as str::FromStr>::Err: fmt::Debug,
 {
-    NotFound,
+    NotFound { flags: Vec<char>, words: Vec<String> },
     ParseError(<T as str::FromStr>::Err),
 }
 
-/// Implementing Display is needed for implementing std::error::Error.
-impl<T> fmt::Display for GetError<T>
+/// Offer nicer error-messages to user.
+/// Implementing `Display` is also needed for `std::error::Error`.
+impl<T> fmt::Display for CollectError<T>
 where
     T: str::FromStr,
     <T as str::FromStr>::Err: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
-            GetError::NotFound => String::from("GetError::NotFound"),
-            GetError::ParseError(err) => format!(
-                "GetError::ParseError({:?})",
-                err,
-            ),
+            Self::NotFound { flags, words } => format!(
+                    "Option not found {}{}",
+                    flags.iter()
+                        .map(|c| format!(" -{}", c))
+                        .collect::<String>(),
+                    words.iter()
+                        .map(|s| format!(" --{}", s))
+                        .collect::<String>(),
+                ),
+            Self::ParseError(err) => format!("Bad format: {:?}", err),
         };
         write!(f, "{}", msg)
     }
 }
 
-type GetResult<T> = Result<T, GetError<T>>;
+impl<T> CollectError<T>
+where
+    T: str::FromStr,
+    <T as str::FromStr>::Err: fmt::Debug,
+{
+    /// Create the NotFound-variant based on the argument keys passed in.
+    /// `CollectError` uses this function in creating a better error message.
+    ///
+    /// Example:
+    /// ```
+    /// use terminal_toys::smargs::{Smargs, CollectError as Ce};
+    /// let smargs = Smargs::new(
+    ///         "foo.exe -bar --baz".split(' ').map(String::from)
+    ///     ).unwrap();
+    /// let notfound_err_msg = smargs.gets::<i32>(&["output", "out", "o"])
+    ///     .unwrap_err()
+    ///     .to_string();
+    /// assert!(notfound_err_msg.contains("output"));
+    /// assert!(notfound_err_msg.contains("out"));
+    /// assert!(notfound_err_msg.contains("o"));
+    /// // TODO Position of the argument (in the order of the gets-query?).
+    /// ```
+    fn not_found(keys: &[&str]) -> Self {
+        let mut words = Vec::new();
+        let mut flags = Vec::new();
+        // TODO Could allocations be reduced by passing keys intelligentler?
+        for key in keys {
+            if key.len() == 1 {
+                flags.push(key.chars().next().unwrap());
+            } else if key.len() > 1 {
+                words.push(String::from(*key));
+            }
+        }
+        Self::NotFound { words, flags }
+    }
+}
 
 
 #[cfg(test)]
