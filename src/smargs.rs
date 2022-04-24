@@ -7,10 +7,10 @@ use std::fmt;
 
 /// Error type for `Smargs`'s constructors.
 ///
-/// `SmargsError::Duplicate` can be used to tell the caller which argument was
-/// a duplicate and its token-type.
+/// `SmargsInitError::Duplicate` can be used to tell the caller which argument
+/// was a duplicate and its token-type.
 #[derive(Debug, PartialEq)]
-pub enum SmargsError {
+pub enum SmargsInitError {
     Empty,
     Duplicate(Token),
 }
@@ -18,7 +18,7 @@ pub enum SmargsError {
 
 /// Offer nicer error-messages to user.
 /// Implementing `Display` is also needed for `std::error::Error`.
-impl fmt::Display for SmargsError {
+impl fmt::Display for SmargsInitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
             Self::Empty => String::from("No arguments found"),
@@ -30,26 +30,30 @@ impl fmt::Display for SmargsError {
 }
 
 
+type SmargResult<T> = Result<T, SmargError<T>>;
+
 /// Error type for getting and parsing the values of arguments.
-pub enum CollectError<T>
+#[derive(Debug)]
+pub enum SmargError<T>
 where
     T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
+    <T as str::FromStr>::Err: fmt::Debug
 {
-    NotFound { flags: Vec<char>, words: Vec<String> },
-    ParseError(<T as str::FromStr>::Err),
+    Key { flags: Vec<char>, words: Vec<String> },
+    Position(usize),
+    Parsing(<T as str::FromStr>::Err),
 }
-impl<T> CollectError<T>
+impl<T> SmargError<T>
 where
     T: str::FromStr,
     <T as str::FromStr>::Err: fmt::Debug,
 {
-    /// Create the NotFound-variant based on the argument keys passed in.
-    /// `CollectError` uses this function in creating a better error message.
+    /// Create the Key-variant based on the argument keys passed in.
+    /// `SmargError` uses this function in creating a better error message.
     ///
     /// Example:
     /// ```
-    /// use terminal_toys::smargs::{Smargs, CollectError as Ce};
+    /// use terminal_toys::smargs::{Smargs, SmargError as Ce};
     /// let smargs = Smargs::new(
     ///         "foo.exe -bar --baz".split(' ').map(String::from)
     ///     ).unwrap();
@@ -72,7 +76,7 @@ where
                 words.push(String::from(*key));
             }
         }
-        Self::NotFound { words, flags }
+        Self::Key { words, flags }
     }
 }
 
@@ -80,15 +84,15 @@ where
 
 /// Offer nicer error-messages to user.
 /// Implementing `Display` is also needed for `std::error::Error`.
-impl<T> fmt::Display for CollectError<T>
+impl<T> fmt::Display for SmargError<T>
 where
     T: str::FromStr,
     <T as str::FromStr>::Err: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
-            Self::NotFound { flags, words } => format!(
-                    "Option not found {}{}",
+            Self::Key { flags, words } => format!(
+                    "option not found {}{}",
                     flags.iter()
                         .map(|c| format!(" -{}", c))
                         .collect::<String>(),
@@ -96,7 +100,8 @@ where
                         .map(|s| format!(" --{}", s))
                         .collect::<String>(),
                 ),
-            Self::ParseError(err) => format!("Bad format: {:?}", err),
+            Self::Position(i) => format!("position not in bounds: {}", i),
+            Self::Parsing(err) => format!("bad format: {:?}", err),
         };
         write!(f, "{}", msg)
     }
@@ -121,25 +126,25 @@ pub enum Token {
 ///
 /// # Example:
 /// ```
-/// use terminal_toys::smargs::{Smargs, CollectError as Ce};
+/// use terminal_toys::smargs::{Smargs, SmargError as Ce};
 ///
 /// let smargs = terminal_toys::Smargs::new(
 ///     "tupletize.exe -v --amount 3 foo".split(' ').map(String::from)
 /// ).unwrap();
 ///
-/// let target = smargs.last().expect("Specify target as the last argument");
-/// let n: usize = match smargs.gets(&["amount", "a"]) {
-///     Err(Ce::NotFound { .. }) => panic!("Missing argument"),
-///     Err(Ce::ParseError(e))   => panic!("Failed to parse: {:?}", e),
-///     Ok(m) => m,
-/// };
+/// let target: String = smargs.last()
+///     .expect("Specify target as the last argument");
+/// let n: usize = smargs.gets(&["amount", "a"]).expect("Argument failure");
 /// let mut result = String::from("()");
 /// if n > 0 {
 ///     result = format!("({})", vec![String::from(target); n].join(", "));
 ///
 ///     if smargs.has("v") {
 ///         // Prints: "tupletize.exe: Result is 15 characters"
-///         println!("{}: Result is {} characters", smargs.exe(), result.len());
+///         println!(
+///             "{}: Result is {} characters",
+///             smargs.exe(), result.len()
+///         );
 ///     }
 /// }
 ///
@@ -169,8 +174,8 @@ pub struct Smargs {
 impl Smargs {
     pub fn new(
         mut args: impl Iterator<Item = String>,
-    ) -> Result<Self, SmargsError> {
-        let exe = args.next().ok_or(SmargsError::Empty)?;
+    ) -> Result<Self, SmargsInitError> {
+        let exe = args.next().ok_or(SmargsInitError::Empty)?;
 
         // Contains the original arguments without empty ones
         // TODO parse into typed enums
@@ -238,7 +243,7 @@ impl Smargs {
             if let Some((key, value)) = kv_opt {
                 if let Some(_value) = dict.insert(key, value) {
                     return Err(
-                        SmargsError::Duplicate(current_token.clone())
+                        SmargsInitError::Duplicate(current_token.clone())
                     )
                 }
             }
@@ -250,7 +255,7 @@ impl Smargs {
     }
 
     /// Creates `Smargs` from a call to `std::env::args`.
-    pub fn from_env() -> Result<Self, SmargsError> {
+    pub fn from_env() -> Result<Self, SmargsInitError> {
         Self::new(std::env::args())
     }
 
@@ -263,21 +268,54 @@ impl Smargs {
         &self.list.len() - 1
     }
 
-    pub fn first(&self) -> Option<&String> {
+    /// Parse and return the nth item in list.
+    /// TODO Should the return value be strictly from the _values_ (ie. the
+    /// arguments) or can the options and values be returned "mixed"?
+    pub fn nth<T>(&self, index: usize) -> SmargResult<T>
+    where
+        T: str::FromStr,
+        <T as str::FromStr>::Err: fmt::Debug,
+    {
         // Do not include the "boolean" at the end
-        self.list[..self.list.len() - 1].first()
+        Self::parse_arg(
+            self.list[..self.list.len() - 1]
+                .get(index)
+                .ok_or(SmargError::Position(index))?
+        )
     }
 
-    pub fn last(&self) -> Option<&String> {
+    pub fn first<T>(&self) -> SmargResult<T>
+    where
+        T: str::FromStr,
+        <T as str::FromStr>::Err: fmt::Debug,
+    {
         // Do not include the "boolean" at the end
-        self.list[..self.list.len() - 1].last()
+        Self::parse_arg(
+            self.list[..self.list.len() - 1]
+                .first()
+                .ok_or(SmargError::Position(0))?
+        )
+    }
+
+    pub fn last<T>(&self) -> SmargResult<T>
+    where
+        T: str::FromStr,
+        <T as str::FromStr>::Err: fmt::Debug,
+    {
+        // Do not include the "boolean" at the end
+        Self::parse_arg(
+            self.list[..self.list.len() - 1]
+                .last()
+                // NOTE It's dumb to return N - 1, as the list is empty anyway.
+                .ok_or(SmargError::Position(self.list.len() - 1))?
+        )
     }
 
     /// Return the matching value based on a list of keys.
     // TODO Also keep a record of the order of calls to this (see
     // GetsError::not_found) -> which would need the values to be removed from
     // the smargs-instance.
-    pub fn gets<T>(&self, keys: &[&str]) -> Result<T, CollectError<T>>
+    pub fn gets<T>(&self, keys: &[&str]) -> Result<T, SmargError<T>>
     where
         T: str::FromStr,
         <T as str::FromStr>::Err: fmt::Debug,
@@ -288,14 +326,22 @@ impl Smargs {
                     .map(|&i| self.list.get(i))
                     .flatten()
             {
-                return s.parse::<T>().map_err(|e| CollectError::ParseError(e))
+                return Self::parse_arg(s)
             }
         }
-        return Err(CollectError::not_found(keys))
+        return Err(SmargError::not_found(keys))
     }
 
     pub fn has(&self, key: &str) -> bool {
         self.dict.contains_key(key)
+    }
+
+    fn parse_arg<T>(arg: &str) -> SmargResult<T>
+    where
+        T: str::FromStr,
+        <T as str::FromStr>::Err: fmt::Debug,
+    {
+        arg.parse::<T>().map_err(|e| SmargError::Parsing(e))
     }
 }
 
@@ -348,7 +394,7 @@ impl ops::Index<ops::RangeTo<usize>> for Smargs {
 
 #[cfg(test)]
 mod tests {
-    use super::{Smargs, SmargsError, Token};
+    use super::{Smargs, SmargsInitError, SmargError, Token};
     #[test]
     fn test_smargs_use_case() {
         let smargs = Smargs::new(
@@ -386,25 +432,78 @@ mod tests {
         assert_eq!(smargs["verbose"], "true");
         assert!(smargs.has("verbose"));
         assert!(!smargs.has("v"));
-        assert_eq!(smargs.first(), Some(&smargs[0]));
-        assert_eq!(smargs.first(), Some(&String::from("nn")));
-        assert_eq!(smargs.last(), Some(&String::from("scaled.png")));
+        assert_eq!(smargs.first::<String>().unwrap(), smargs[0]);
+        assert_eq!(smargs.first::<String>().unwrap(), String::from("nn"));
+        assert_eq!(
+            smargs.last::<std::path::PathBuf>().unwrap(),
+            std::path::PathBuf::from("scaled.png")
+        );
     }
 
     #[test]
     fn test_smargs_first_last() {
-        let args = "foo.exe bar".split(' ').map(String::from);
+        let args = "foo.exe 42".split(' ').map(String::from);
         let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.first(), Some(&String::from("bar")));
-        assert_eq!(smargs.last(), Some(&String::from("bar")));
+        assert_eq!(smargs.first::<u32>().unwrap(), 42);
+        assert_eq!(smargs.last::<u32>().unwrap(), 42);
+
+        let args = "foo.exe 42 bar baz".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
+        assert_eq!(smargs.first::<u32>().unwrap(), 42);
+        assert!(match smargs.last::<u32>().unwrap_err() {
+            SmargError::Parsing(_) => true,
+            _ => false,
+        });
+        assert_eq!(smargs.last::<String>().unwrap(), String::from("baz"));
+    }
+
+    #[test]
+    fn test_smargs_nth() {
+        let args = "foo.exe 42".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
+        assert_eq!(smargs.nth::<u32>(0).unwrap(), 42);
+        assert_eq!(smargs.nth::<u32>(smargs.len() - 1).unwrap(), 42);
+
+        {
+            assert_eq!(smargs.len(), 1);
+            assert!(match smargs.nth::<u32>(1).unwrap_err() {
+                SmargError::Position(1) => true,
+                    _ => false,
+            });
+            // (Test that the inner list length does not effect.)
+            assert!(match smargs.nth::<u32>(2).unwrap_err() {
+                SmargError::Position(2) => true,
+                    _ => false,
+            });
+        }
+
+        let args = "foo.exe 42 bar baz".split(' ').map(String::from);
+        let smargs = Smargs::new(args).unwrap();
+
+        assert_eq!(smargs.nth::<u32>(0).unwrap(), 42);
+        assert_eq!(smargs.nth::<String>(0).unwrap(), String::from("42"));
+
+        assert_eq!(smargs.nth::<String>(1).unwrap(), String::from("bar"));
+        assert!(match smargs.nth::<u32>(1).unwrap_err() {
+            SmargError::Parsing(_) => true,
+            _ => false,
+        });
+
+        assert_eq!(smargs.nth::<String>(2).unwrap(), String::from("baz"));
     }
 
     #[test]
     fn test_smargs_exe() {
         let args = "foo.exe".split(' ').map(String::from);
         let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.first(), None);
-        assert_eq!(smargs.last(), None);
+        assert!(match smargs.first::<u32>().unwrap_err() {
+            SmargError::Position(0) => true,
+            _ => false,
+        });
+        assert!(match smargs.last::<u32>().unwrap_err() {
+            SmargError::Position(0) => true,
+            _ => false,
+        });
         assert_eq!(smargs.exe(), &String::from("foo.exe"));
     }
 
@@ -415,7 +514,7 @@ mod tests {
         // Catch the first duplicate that appears from left to right
         assert_eq!(
             double_flag,
-            Err(SmargsError::Duplicate(Token::Flag('f')))
+            Err(SmargsInitError::Duplicate(Token::Flag('f')))
         );
 
         let args = "some.exe --foo --foo --bar --bar".split(' ')
@@ -423,7 +522,7 @@ mod tests {
         let double_word = Smargs::new(args);
         assert_eq!(
             double_word,
-            Err(SmargsError::Duplicate(Token::Word(String::from("foo"))))
+            Err(SmargsInitError::Duplicate(Token::Word(String::from("foo"))))
         );
 
         let args = "some.exe -fo -of --bar --bar".split(' ')
@@ -431,7 +530,7 @@ mod tests {
         let double_flag = Smargs::new(args);
         assert_eq!(
             double_flag,
-            Err(SmargsError::Duplicate(Token::Flag('o')))
+            Err(SmargsInitError::Duplicate(Token::Flag('o')))
         );
     }
 
@@ -461,7 +560,7 @@ mod tests {
     #[test]
     fn test_smargs_empty() {
         let smargs = Smargs::new(std::iter::empty());
-        assert_eq!(smargs, Err(SmargsError::Empty));
+        assert_eq!(smargs, Err(SmargsInitError::Empty));
     }
 
     #[test]
