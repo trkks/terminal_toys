@@ -49,12 +49,34 @@ where
     T: str::FromStr,
     <T as str::FromStr>::Err: fmt::Debug,
 {
+    /// Return if failed to get argument because it was not found.
+    ///
+    /// Example:
+    /// ```
+    /// use terminal_toys::smargs::{Smargs, SmargError as Se};
+    /// let smargs = Smargs::new(
+    ///         "foo.exe -bar --baz".split(' ').map(String::from)
+    ///     ).unwrap();
+    ///
+    /// let (pos, key) = (smargs.nth::<u32>(2), smargs.gets::<u32>(&["qux"]));
+    ///
+    /// assert!(pos.is_err() && key.is_err());
+    /// assert!(pos.unwrap_err().is_not_found());
+    /// assert!(key.unwrap_err().is_not_found());
+    /// ```
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::Parsing(_) => false,
+            _ => true,
+        }
+    }
+
     /// Create the Key-variant based on the argument keys passed in.
     /// `SmargError` uses this function in creating a better error message.
     ///
     /// Example:
     /// ```
-    /// use terminal_toys::smargs::{Smargs, SmargError as Ce};
+    /// use terminal_toys::smargs::{Smargs, SmargError as Se};
     /// let smargs = Smargs::new(
     ///         "foo.exe -bar --baz".split(' ').map(String::from)
     ///     ).unwrap();
