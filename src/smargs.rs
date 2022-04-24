@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::error;
+use std::fmt;
 use std::iter;
 use std::ops;
 use std::str;
-use std::fmt;
 
 
 /// Error type for `Smargs`'s constructors.
@@ -108,6 +109,13 @@ where
 }
 
 
+impl<T> error::Error for SmargError<T>
+where
+    T: str::FromStr + fmt::Debug,
+    <T as str::FromStr>::Err: fmt::Debug,
+{}
+
+
 /// Makes handling the args -strings a bit clearer
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -126,18 +134,27 @@ pub enum Token {
 ///
 /// # Example:
 /// ```
-/// use terminal_toys::smargs::{Smargs, SmargError as Ce};
+/// use terminal_toys::smargs::{Smargs, SmargError as Se};
+/// use std::error;
+///
+/// fn get_args(
+///     smargs: &Smargs,
+/// ) -> Result<(String, usize), Box<dyn error::Error>> {
+///     Ok((smargs.last()?, smargs.gets(&["amount", "a"])?))
+/// }
 ///
 /// let smargs = terminal_toys::Smargs::new(
 ///     "tupletize.exe -v --amount 3 foo".split(' ').map(String::from)
 /// ).unwrap();
 ///
-/// let target: String = smargs.last()
-///     .expect("Specify target as the last argument");
-/// let n: usize = smargs.gets(&["amount", "a"]).expect("Argument failure");
+/// let (target, n) = match get_args(&smargs) {
+///     Err(e) => panic!("Argument failure: {}", e),
+///     Ok(x)  => x,
+/// };
+///
 /// let mut result = String::from("()");
 /// if n > 0 {
-///     result = format!("({})", vec![String::from(target); n].join(", "));
+///     result = format!("({})", vec![target.clone(); n].join(", "));
 ///
 ///     if smargs.has("v") {
 ///         // Prints: "tupletize.exe: Result is 15 characters"
