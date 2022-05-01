@@ -31,6 +31,8 @@ impl fmt::Display for SmargsInitError {
 }
 
 
+impl error::Error for SmargsInitError {}
+
 type SmargResult<T> = Result<T, SmargError<T>>;
 
 /// Error type for getting and parsing the values of arguments.
