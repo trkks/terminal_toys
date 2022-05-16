@@ -6,6 +6,11 @@ use std::ops;
 use std::str;
 
 
+pub trait WTF: fmt::Debug {}
+/// "Type" that can be parsed from string (and used in std::error::Error?).
+pub trait CliArg: str::FromStr + str::FromStr<Err=Box<dyn WTF>> + fmt::Debug {}
+
+
 /// Error type for `Smargs`'s constructors.
 ///
 /// `SmargsInitError::Duplicate` can be used to tell the caller which argument
@@ -39,8 +44,7 @@ type SmargResult<T> = Result<T, SmargError<T>>;
 #[derive(Debug)]
 pub enum SmargError<T>
 where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug
+    T: CliArg,
 {
     Key { flags: Vec<char>, words: Vec<String> },
     Position(usize),
@@ -48,8 +52,7 @@ where
 }
 impl<T> SmargError<T>
 where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
+    T: CliArg,
 {
     /// Return if failed to get argument because it was not found.
     ///
@@ -111,8 +114,7 @@ where
 /// Implementing `Display` is also needed for `std::error::Error`.
 impl<T> fmt::Display for SmargError<T>
 where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
+    T: CliArg,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
@@ -135,8 +137,7 @@ where
 
 impl<T> error::Error for SmargError<T>
 where
-    T: str::FromStr + fmt::Debug,
-    <T as str::FromStr>::Err: fmt::Debug,
+    T: CliArg,
 {}
 
 
@@ -314,8 +315,7 @@ impl Smargs {
     /// arguments) or can the options and values be returned "mixed"?
     pub fn nth<T>(&self, index: usize) -> SmargResult<T>
     where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
+        T: CliArg,
     {
         // Do not include the "boolean" at the end
         Self::parse_arg(
@@ -327,8 +327,7 @@ impl Smargs {
 
     pub fn first<T>(&self) -> SmargResult<T>
     where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
+        T: CliArg,
     {
         // Do not include the "boolean" at the end
         Self::parse_arg(
@@ -340,8 +339,7 @@ impl Smargs {
 
     pub fn last<T>(&self) -> SmargResult<T>
     where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
+        T: CliArg,
     {
         // Do not include the "boolean" at the end
         Self::parse_arg(
@@ -358,8 +356,7 @@ impl Smargs {
     // the smargs-instance.
     pub fn gets<T>(&self, keys: &[&str]) -> Result<T, SmargError<T>>
     where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
+        T: CliArg,
     {
         for &key in keys {
             if let Some(s)
@@ -379,10 +376,13 @@ impl Smargs {
 
     fn parse_arg<T>(arg: &str) -> SmargResult<T>
     where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
+        T: CliArg,
     {
         arg.parse::<T>().map_err(|e| SmargError::Parsing(e))
+    }
+
+    fn build(self) -> CliDefinition {
+        CliDefinition::new(self)
     }
 }
 
@@ -636,3 +636,224 @@ mod tests {
         let _ = smargs[0..3];
     }
 }
+
+
+
+/// A builder for ordering, parsing and generating instructions for
+/// CLI-arguments.
+///
+/// NOTE: The ordering is defined by the order in which the option-defining
+/// -methods like `required` or `optional` are called.
+struct CliDefinition {
+    smargs: Smargs,
+    instruction: String,
+    enumeration: usize,
+}
+
+impl CliDefinition {
+    /// Constructor to start the builder.
+    fn new(smargs: Smargs) -> Self {
+        Self {
+            smargs,
+            instruction: String::new(),
+            enumeration: 0,
+        }
+    }
+
+    /// Define that instructions (a "help"-message) will be returned when the
+    /// `--help` and `-h` -options are encountered along with a description of
+    /// the overall program.
+    pub fn instruct(mut self, description: &str) -> Self {
+        // Mark the instructions to be build after all args are collected.
+        self.instruction = format!("{}", description);
+        self
+    }
+
+    /// Define a required argument i.e. input that is required from the user to
+    /// use the program.
+    pub fn required<T: CliArg>(
+        mut self,
+        words: &[&str],
+        flags: &[char],
+        description: &str,
+    ) -> Self {
+        self.enumeration += 1;
+        todo!()
+    }
+
+    /// Define an optional argument i.e. input that has a default value in case
+    /// the user does not specify any.
+    pub fn optional<T: CliArg>(
+        mut self,
+        words: &[&str],
+        flags: &[char],
+        description: &str,
+        default: T,
+    ) -> Self {
+        self.enumeration += 1;
+        todo!()
+    }
+
+    pub fn generate(
+        mut self,
+        words: &[&str],
+        flags: &[char],
+        description: &str,
+        generator: &dyn Fn(Self) -> Self,
+    ) -> Self {
+        self.enumeration += 1;
+        todo!()
+    }
+}
+
+
+impl From<CliDefinition> for () {
+    fn from(_: CliDefinition) -> Self {
+        ()
+    }
+}
+
+impl<A: CliArg> From<CliDefinition> for SmargResult<A> {
+    fn from(cd: CliDefinition) -> Self {
+        cd.smargs.nth(0)
+    }
+}
+
+impl<A: CliArg, B: CliArg> From<CliDefinition> for (SmargResult<A>, SmargResult<B>) {
+    fn from(cd: CliDefinition) -> Self {
+        (cd.smargs.nth(0), cd.smargs.nth(1))
+    }
+}
+
+/* // TODO Implement more of these if needed.
+impl<A, B, C> From<CliDefinition>
+    for (SmargResult<A>, SmargResult<B>, SmargResult<C>)
+{
+    fn from(_: CliDefinition) -> Self {
+        ()
+    }
+}
+
+impl<A, B, C> From<CliDefinition>
+    for (SmargResult<A>, SmargResult<B>, SmargResult<C>, SmargResult<D>)
+{
+    fn from(_: CliDefinition) -> Self {
+        ()
+    }
+}
+
+impl<A, B, C> From<CliDefinition>
+    for (RA, RB, RC, RD, RE)
+    where
+        RA: Result<A>,
+{
+    fn from(_: CliDefinition) -> Self {
+        ()
+    }
+}
+
+impl<A, B, C> From<CliDefinition>
+    for (SmargResult<A>, SmargResult<B>, SmargResult<C>, SmargResult<D>)
+{
+    fn from(_: CliDefinition) -> Self {
+        ()
+    }
+}*/
+
+/*
+/// Trait to allow building a list of different typed arguments along with
+/// useful information for a command line interface.
+/// # Example:
+/// ```
+/// use std::path::Path;
+/// use std::convert::TryInto
+/// type MyArgs = (Path, usize, bool, String);
+/// // Implement for the type you want your arguments in.
+/// impl TryFrom<Smargs> for MyArgs {
+///     type Error = <Smargs as TryInto>::Error;
+///     fn try_from(smargs: Smargs) -> Result<Self, Self::Error> {
+///         todo!()
+///     }
+/// }
+/// // Get and parse arguments with defaults and based on order or options.
+/// let args: MyArgs = Smargs::new(
+///         vec!["foo.exe", "./bar", "--baz", 42, "-v"].iter()
+///     ).unwrap()
+///     // The items in this list need to implement the Smarg-trait.
+///     .build(&[
+///         Path::smarg(&["src"],     &['s'], "Path to file",    None),
+///         usize::smarg(&["baz"],    &['b'], "Favorite number", Some(666)),
+///         bool::smarg(&["verbose"], &['v'], "Verbose output",  Some(false)),
+///         bool::smarg(&["qux"],     &['q'], "Username",        Some("Jane")),
+///     ])
+///     .try_into()
+///     .unwrap();
+///
+/// assert_eq!(path.to_str(), Some("bar"));
+/// assert_eq!(num, 42);
+/// assert_eq!(verbose, true);
+/// assert_eq!(&name, "Jane");
+/// ```
+pub trait Smarg<T> {
+    type Output = T;
+    fn smarg(
+        words: &[&str],
+        flags: &[&str],
+        help: &str,
+        default: Option<Self::Output>,
+    ) -> SmargBuilder<Self> {
+        SmargBuilder {
+            words: words.iter().map(String::from).collect(),
+            flags: flags.iter().map(String::from).collect(),
+            help: String::from(help),
+            default,
+        }
+    }
+}
+
+// NOTE: Add to this list the types that should be supported from command line.
+impl Smarg for bool { }
+impl Smarg for usize { }
+impl Smarg for std::path::Path { }
+
+/// Struct for holding information related to an argument which are useful for
+/// a command line interface.
+pub struct SmargBuilder {
+    words: Vec<String>,
+    flags: Vec<String>,
+    help: String,
+    default: Option<Self>,
+}
+
+/// Trait that a `Smargs` instance can be build based on.
+/// # Example:
+/// ```
+/// type MyArgs = (usize, usize, bool);
+/// impl Smargsable for MyArgs {
+///     fn smargsable() -> SmargsBuilder {
+///         SmargsBuilder(vec![
+///             Path::smarg(&["src"],     &['s'], "Path to file",    None),
+///             usize::smarg(&["baz"],    &['b'], "Favorite number", Some(666)),
+///             bool::smarg(&["verbose"], &['v'], "Verbose output",  Some(false)),
+///             bool::smarg(&["qux"],     &['q'], "Username",        Some("Jane")),
+///         ])
+///     }
+/// }
+/// // Now the MyArgs can be built from Smargs, and the help-strings and
+/// // default-data are returned in needed situations.
+/// let my_args = MyArgs::smargs()
+///     .new(vec!["foo.exe", "./bar", "--baz", 42, "-v"].iter())
+///     .try_into();
+/// ```
+pub trait SmargsBuilder {
+    fn build() -> Vec<SmargBuilder>;
+}
+
+/// Enable the generic constrained T to be constructed from `Smargs`.
+impl TryFrom<Smargs> for T: SmargsBuilder {
+    type Error = SmargsInitError;
+    fn try_from(smargs: Smargs) -> Result<Self, Self::Error> {
+        smargs.apply(Self::build())
+    }
+}
+*/
