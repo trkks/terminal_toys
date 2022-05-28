@@ -5,7 +5,7 @@ Thingamajigs to make command-line programs more user (and developer) -friendly.
 Stands for *smarter arguments* but calling it *smart* may be a bit of a stretch.
 Simply maps a list of strings into command-line options and values by recognizing `--` and `-` from their beginning.
 
-For example suppose you had a program for manipulating a row in a file. This might need a filepath on 
+For example suppose you had a program for manipulating a row in a text file. This might need a filepath on 
 the operating system `file` and an integer `row` as input.
 For a small program like this you would probably define some fixed order for the user of your program to 
 use (e.g. file 1st and row as 2nd) and then parse the strings to the needed types according to this.
@@ -24,7 +24,7 @@ let file: std::path::Path = smargs.gets(&["file", "f"])?;
 let row: usize = smargs.gets(&["row", "r"])?;
 ```
 ## ProgressBar
-Programs taking a long time processing benefit from displaying a progress bar also on the command-line.
+Programs that take a long time processing will benefit from displaying their real-time status also on the command-line.
 
 Example scenario of eight threads running simultaneously with each having their own progress bar:
 ```
