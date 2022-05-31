@@ -5,6 +5,14 @@ use std::fmt;
 use std::iter;
 use std::str::FromStr;
 
+
+/////////////////////////////////////////////////////////////////////////////
+// Constants
+/////////////////////////////////////////////////////////////////////////////
+
+const HELP_FLAG: &str = "h";
+const HELP_WORD: &str = "help";
+
 /////////////////////////////////////////////////////////////////////////////
 // SmargError
 /////////////////////////////////////////////////////////////////////////////
@@ -234,7 +242,12 @@ impl SmargsParser {
 
 #[cfg(test)]
 mod smarg_parser_tests {
-    use super::{SmargsParser, SmargsParserError, SmargError, Token};
+    use super::{SmargsParser, SmargsParserError, SmargError, Token, Keys};
+    /// Helper to construct `Keys` without cluttering the test-code.
+    fn keys(flags: &[char], words: &[&str]) -> Keys {
+        Keys(flags.to_vec(), words.iter().map(|&s| s.to_owned()).collect())
+    }
+
     #[test]
     fn test_use_case() {
         let sp = SmargsParser::new(
@@ -247,35 +260,47 @@ mod smarg_parser_tests {
             "-h", "300", "--output", "scaled.png",
         ];
 
-        assert_eq!(sp.get_pos(0), Ok(indexable_args[0]));
-        assert_eq!(sp.get_pos(1), Ok(indexable_args[1]));
-        assert_eq!(sp.get_pos(2), Ok(indexable_args[2]));
-        assert_eq!(sp.get_pos(3), Ok(indexable_args[3]));
-        assert_eq!(sp.get_pos(4), Ok(indexable_args[4]));
-        assert_eq!(sp.get_pos(5), Ok(indexable_args[5]));
-        assert_eq!(sp.get_pos(6), Ok(indexable_args[6]));
-        assert_eq!(sp.get_pos(7), Ok(indexable_args[7]));
+        assert_eq!(sp.get_pos(0), Ok(indexable_args[0].to_owned()));
+        assert_eq!(sp.get_pos(1), Ok(indexable_args[1].to_owned()));
+        assert_eq!(sp.get_pos(2), Ok(indexable_args[2].to_owned()));
+        assert_eq!(sp.get_pos(3), Ok(indexable_args[3].to_owned()));
+        assert_eq!(sp.get_pos(4), Ok(indexable_args[4].to_owned()));
+        assert_eq!(sp.get_pos(5), Ok(indexable_args[5].to_owned()));
+        assert_eq!(sp.get_pos(6), Ok(indexable_args[6].to_owned()));
+        assert_eq!(sp.get_pos(7), Ok(indexable_args[7].to_owned()));
 
-        assert_eq!(sp.get_keys(Keys(&["h"], &[])), Ok("300"));
-        assert_eq!(sp.get_keys(Keys(&["w"], &[])), Ok("300"));
-        assert_eq!(sp.get_keys(Keys(&[], &["output"])), Ok("scaled.png"));
-        assert_eq!(sp.get_keys(Keys(&[], &["verbose"])), Ok("true"));
+        assert_eq!(
+			sp.get_keys(&keys(&['h'], &[])),
+			Ok("300".to_owned()),
+		);
+        assert_eq!(
+			sp.get_keys(&keys(&['w'], &[])),
+			Ok("300".to_owned()),
+		);
+        assert_eq!(
+			sp.get_keys(&keys(&[], &["output"])),
+			Ok("scaled.png".to_owned()),
+		);
+        assert_eq!(
+			sp.get_keys(&keys(&[], &["verbose"])),
+			Ok("true".to_owned()),
+		);
         assert!(sp.has("verbose"));
         assert!(!sp.has("v"));
-        assert_eq!(sp.get_pos(0), Ok("nn"));
-        assert_eq!(sp.get_pos(8), Ok("scaled.png"));
+        assert_eq!(sp.get_pos(0), Ok("nn".to_owned()));
+        assert_eq!(sp.get_pos(8), Ok("scaled.png".to_owned()));
     }
 
     #[test]
     fn test_exe() {
         let args = "foo.exe".split(' ').map(String::from);
         let sp = SmargsParser::new(args).unwrap();
-        assert!(match sp.first::<u32>().unwrap_err() {
-            SmargError::Position(0) => true,
+        assert!(match sp.get_pos(0).unwrap_err() {
+            SmargError::BadPosition(0) => true,
             _ => false,
         });
-        assert!(match sp.last::<u32>().unwrap_err() {
-            SmargError::Position(0) => true,
+        assert!(match sp.get_pos(usize::MAX).unwrap_err() {
+            SmargError::BadPosition(0) => true,
             _ => false,
         });
         assert_eq!(sp.exe(), &String::from("foo.exe"));
@@ -315,23 +340,23 @@ mod smarg_parser_tests {
             .map(String::from);
         let diff_types = SmargsParser::new(args).unwrap();
         assert_eq!(
-            diff_types.get_keys((Keys((&["b"], &[]))))
+            diff_types.get_keys(&keys(&['b'], &[]))
                 .unwrap()
                 .parse::<bool>().unwrap(),
             true
         );
         assert_eq!(
-            diff_types.get_keys((Keys((&["a"], &[]))))
+            diff_types.get_keys(&keys(&['a'], &[]))
                 .unwrap()
                 .parse::<bool>().unwrap(),
             true
         );
         assert_eq!(
-            diff_types.get_keys((Keys((&["r"], &[])))).unwrap(),
+            diff_types.get_keys(&keys(&['r'], &[])).unwrap(),
             "r-arg-value"
         );
         assert_eq!(
-            diff_types.get_keys((Keys((&["bar"], &[]))))
+            diff_types.get_keys(&keys(&[], &["bar"]))
                 .unwrap()
                 .parse::<bool>().unwrap(),
             true
@@ -342,31 +367,31 @@ mod smarg_parser_tests {
             .map(String::from);
         let multiple = SmargsParser::new(args).unwrap();
         assert_eq!(
-            multiple.get_keys(Keys((&['b'], &[])))
+            multiple.get_keys(&keys(&['b'], &[]))
                 .unwrap()
                 .parse::<bool>().unwrap(),
             true
         );
         assert_eq!(
-            multiple.get_keys(Keys((&['a'], &[])))
+            multiple.get_keys(&keys(&['a'], &[]))
                 .unwrap()
                 .parse::<bool>().unwrap(),
             true
         );
         assert_eq!(
-            multiple.get_keys(Keys((&['r'], &[])))
+            multiple.get_keys(&keys(&['r'], &[]))
                 .unwrap()
                 .parse::<bool>().unwrap(),
             true
         );
         assert_eq!(
-            multiple.get_keys(Keys((&[], &["verbose"])))
+            multiple.get_keys(&keys(&[], &["verbose"]))
                 .unwrap()
                 .parse::<bool>().unwrap(),
             true
         );
         assert_eq!(
-            multiple.get_keys(Keys((&['f'], &[])))
+            multiple.get_keys(&keys(&['f'], &[]))
                 .unwrap()
                 .parse::<f32>().unwrap(),
             4.2
@@ -385,7 +410,7 @@ mod smarg_parser_tests {
     fn test_empty_key() {
         let args = "some.exe foo".split(' ').map(String::from);
         let sp = SmargsParser::new(args).unwrap();
-        let _ = sp.get_keys(Keys((&[], &[""]))).unwrap();
+        let _ = sp.get_keys(&keys(&[], &[""])).unwrap();
     }
 
     #[test]
@@ -393,7 +418,7 @@ mod smarg_parser_tests {
     fn test_not_a_key() {
         let args = "some.exe foo bar".split(' ').map(String::from);
         if let Ok(sp) = SmargsParser::new(args) {
-            let _ = sp.get_keys(Keys((&[], &["foo"]))).unwrap();
+            let _ = sp.get_keys(&keys(&[], &["foo"])).unwrap();
         }
     }
 
@@ -543,7 +568,7 @@ impl CliDefinition {
         words: &[&str],
         flags: &[char],
         description: &str,
-        default: String,
+        default: &str,
     ) -> Self {
         let i = self.push_arg(words, flags, description);
         // Add to the description the default value of this argument.
@@ -592,12 +617,16 @@ impl CliDefinition {
 
 #[cfg(test)]
 mod cli_definition_tests {
-    use super::{CliDefinition};
+    use super::{CliDefinition, HELP_FLAG, HELP_WORD};
+    type MINIMUM_PARSE_TYPE = (usize, u32);
+
     #[test]
     fn test_position_only() {
         let args = "foo.exe 42".split(' ').map(String::from);
-        let value: usize = CliDefinition::new("Testing 1")
+        let (value, _): MINIMUM_PARSE_TYPE = CliDefinition::new("Testing 1")
             .required(&[], &[], "Forty two")
+            //TODO These _empty_ "extras" might be dumb.
+            .optional(&[], &[], "", "0")
             .parse(args)
             .unwrap();
 
@@ -620,8 +649,9 @@ mod cli_definition_tests {
     #[test]
     fn test_options_only() {
         let args = "foo.exe --meaning 42".split(' ').map(String::from);
-        let value: usize = CliDefinition::new("Testing")
+        let (value, _): MINIMUM_PARSE_TYPE = CliDefinition::new("Testing")
             .required(&["meaning"], &['m'], "Forty two")
+            .optional(&[], &[], "", "0")
             .parse(args)
             .unwrap();
 
@@ -670,7 +700,7 @@ mod cli_definition_tests {
         let args = "foo.exe --baz".split(' ').map(String::from);
         let err = CliDefinition::new("Testing")
                 .required(&["bar"], &['b'], "Bar")
-                .parse(args)
+                .parse::<_, (u32, u32)>(args)
                 .unwrap_err();
         assert!(err.to_string().to_lowercase().contains("unrecognized"));
         assert!(err.to_string().to_lowercase().contains("baz"));
@@ -683,8 +713,9 @@ mod cli_definition_tests {
     #[test]
     fn test_optionals_only() {
         let args = "foo.exe".split(' ').map(String::from);
-        let value: usize = CliDefinition::new("Testing")
+        let (value, _): (usize, u32) = CliDefinition::new("Testing")
             .optional(&["meaning"], &['m'], "Forty two", "42")
+            .optional(&[], &[], "", "0")
             .parse(args)
             .unwrap();
 
@@ -707,21 +738,55 @@ mod cli_definition_tests {
     #[test]
     fn test_instruct() {
         let help_str = "Make something with a width";
-        let args = "foo.exe -w 42".split(' ').map(String::from);
-        let width: u32 = CliDefinition::new("Testing")
-            .instruct(help_str)
-            .required(&["width"], &['w'], "Width of the something")
-            .parse(args)
-            .unwrap_err();
 
-        assert_eq!(width, 42);
+        let args_flag = format!("foo.exe -{}", HELP_FLAG)
+            .split(' ')
+            .map(String::from)
+            .collect::<Vec<String>>();
+        let args_word = format!("foo.exe --{}", HELP_WORD)
+            .split(' ')
+            .map(String::from)
+            .collect::<Vec<String>>();
+        // NOTE Help overrides other options.
+        let args_mixed = format!("foo.exe -w 42 -{}", HELP_FLAG)
+            .split(' ')
+            .map(String::from)
+            .collect::<Vec<String>>();
 
-        let help_str = "Make something with a width";
+        assert!(
+            CliDefinition::new("Testing")
+                .instruct(help_str)
+                .required(&["width"], &['w'], "Width of the something")
+                .optional(&[], &[], "", "0")
+                .parse::<_, MINIMUM_PARSE_TYPE>(args_flag)
+                .unwrap_err()
+                .to_string().to_lowercase().contains(help_str)
+        );
+        assert!(
+            CliDefinition::new("Testing")
+                .instruct(help_str)
+                .required(&["width"], &['w'], "Width of the something")
+                .optional(&[], &[], "", "0")
+                .parse::<_, MINIMUM_PARSE_TYPE>(args_word)
+                .unwrap_err()
+                .to_string().to_lowercase().contains(help_str)
+        );
+        assert!(
+            CliDefinition::new("Testing")
+                .instruct(help_str)
+                .required(&["width"], &['w'], "Width of the something")
+                .optional(&[], &[], "", "0")
+                .parse::<_, MINIMUM_PARSE_TYPE>(args_mixed)
+                .unwrap_err()
+                .to_string().to_lowercase().contains(help_str)
+        );
+
+
         let args = "foo.exe".split(' ').map(String::from);
         let err = CliDefinition::new("Testing")
             .instruct(help_str)
             .required(&["width"], &['w'], "Width of the something")
-            .parse(args)
+            .parse::<_, MINIMUM_PARSE_TYPE>(args)
             .unwrap_err();
 
         assert!(err.to_string().to_lowercase().contains(help_str));
@@ -734,7 +799,7 @@ mod cli_definition_tests {
         let err = CliDefinition::new("Testing")
             .instruct(help_str)
             .required(&["width"], &['w'], "Width of the something")
-            .parse(args)
+            .parse::<_, MINIMUM_PARSE_TYPE>(args)
             .unwrap_err();
 
         assert!(err.to_string().to_lowercase().contains(help_str));
@@ -744,7 +809,7 @@ mod cli_definition_tests {
         let err = CliDefinition::new("Testing")
             .required(&["width"], &['w'], "Width of the something")
             .instruct(help_str)
-            .parse(args)
+            .parse::<_, MINIMUM_PARSE_TYPE>(args)
             .unwrap_err();
 
         assert!(err.to_string().to_lowercase().contains(help_str));
@@ -755,7 +820,7 @@ mod cli_definition_tests {
             .required(&["width"], &['w'], "Width of the something")
             .instruct(help_str)
             .required(&["depth"], &['d'], "Depth of the something")
-            .parse(args)
+            .parse::<_, MINIMUM_PARSE_TYPE>(args)
             .unwrap_err();
 
         assert!(err.to_string().to_lowercase().contains(help_str));
@@ -764,7 +829,7 @@ mod cli_definition_tests {
     #[test]
     fn test_instruct_option_taken() {
         let args = "foo.exe -h 42".split(' ').map(String::from);
-        let height: u32 = CliDefinition::new("Testing")
+        let (height, _): MINIMUM_PARSE_TYPE = CliDefinition::new("Testing")
             .required(&["height"], &['h'], "Height of something")
             .parse(args)
             .unwrap();
@@ -774,11 +839,12 @@ mod cli_definition_tests {
 
     #[test]
     fn test_instruct_option_overridden() {
+        let help_str = "Make something with a height";
         let args = "foo.exe -h 42".split(' ').map(String::from);
         let err = CliDefinition::new("Testing")
             .instruct(help_str)
             .required(&["height"], &['h'], "Height of something")
-            .parse(args)
+            .parse::<_, MINIMUM_PARSE_TYPE>(args)
             .unwrap_err();
 
         assert!(err.to_string().to_lowercase().contains("ambiguous option"));
@@ -788,7 +854,7 @@ mod cli_definition_tests {
     #[should_panic]
     fn test_instruct_replaced() {
         let args = "foo.exe -w 42".split(' ').map(String::from);
-        let _ = CliDefinition::new("Testing")
+        let (_, _): MINIMUM_PARSE_TYPE = CliDefinition::new("Testing")
             .instruct("Does something with width")
             .instruct("Uses width to do something")
             .parse(args)
@@ -878,6 +944,7 @@ impl Smargs {
 // Implementations for the user to utilize `Smargs`
 /////////////////////////////////////////////////////////////////////////////
 
+/* TODO Are these necessary or possible to implement?
 impl TryFrom<CliDefinition> for () {
     type Error = SmargError;
     fn try_from(_: CliDefinition) -> Result<Self, Self::Error> {
@@ -896,6 +963,7 @@ where
         Ok(cd.parse_nth(0)?)
     }
 }
+*/
 
 
 impl<T1, T2> TryFrom<CliDefinition> for (T1, T2)
