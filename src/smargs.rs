@@ -27,6 +27,8 @@ pub enum SmargError {
     BadKeys(Keys),
     BadPosition(usize),
     BadFormat(String),
+    Unrecognized(Token),
+    Ambiguous(Token),
 }
 
 
@@ -46,6 +48,8 @@ impl fmt::Display for SmargError {
                 ),
             Self::BadPosition(i) => format!("position not in bounds: {}", i),
             Self::BadFormat(s) => format!("parsing error: {}", s),
+            Self::Unrecognized(t) => format!("unrecognized option: {}", t),
+            Self::Ambiguous(t) => format!("ambiguous option: {}", t),
         };
         write!(f, "{}", msg)
     }
@@ -68,6 +72,7 @@ impl error::Error for SmargError {}
 pub enum SmargsParserError {
     Empty,
     Duplicate(Token),
+    // TODO This sort of layering feels dumb.
     Smarg(SmargError)
 }
 
@@ -98,6 +103,16 @@ pub enum Token {
     Value(String),
     Flag(char),
     Word(String),
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}", match self {
+            Self::Value(s) => format!("Value '{}'", s),
+            Self::Flag(c)  => format!("Flag '-{}'", c),
+            Self::Word(s)  => format!("Word '--{}'", s),
+        })
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -288,7 +303,7 @@ mod smarg_parser_tests {
         assert!(sp.has("verbose"));
         assert!(!sp.has("v"));
         assert_eq!(sp.get_pos(0), Ok("nn".to_owned()));
-        assert_eq!(sp.get_pos(8), Ok("scaled.png".to_owned()));
+        assert_eq!(sp.get_pos(7), Ok("scaled.png".to_owned()));
     }
 
     #[test]
@@ -300,7 +315,7 @@ mod smarg_parser_tests {
             _ => false,
         });
         assert!(match sp.get_pos(usize::MAX).unwrap_err() {
-            SmargError::BadPosition(0) => true,
+            SmargError::BadPosition(usize::MAX) => true,
             _ => false,
         });
         assert_eq!(sp.exe(), &String::from("foo.exe"));
@@ -454,7 +469,6 @@ struct Smarg {
 /// -methods like `required` or `optional` are called. The executable name
 /// (often the first argument) is not included.
 pub struct CliDefinition {
-    enumeration: usize,
     instruction: String,
     list: Vec<Smarg>,
 }
@@ -471,12 +485,11 @@ impl CliDefinition {
         description: &str,
     ) -> usize {
         // Always enumerate, even if finding argument fails.
-        self.enumeration += 1;
         self.list.push(Smarg {
             value: None,
             description: format!(
                 "{}) {}{}:: {}.",
-                self.enumeration,
+                self.list.len(),
                 flags.iter().
                     map(|x| format!("-{} ", x)).collect::<String>(),
                 words.iter()
@@ -488,13 +501,12 @@ impl CliDefinition {
                 words.iter().map(|&x| x.to_owned()).collect()
             ),
         });
-        self.enumeration
+        self.list.len() - 1
     }
 
     /// Private constructor to start the builder.
     fn new(description: &str) -> Self {
         Self {
-            enumeration: 0,
             instruction: description.to_owned(),
             list: Vec::new(),
         }
@@ -617,8 +629,29 @@ impl CliDefinition {
 
 #[cfg(test)]
 mod cli_definition_tests {
-    use super::{CliDefinition, HELP_FLAG, HELP_WORD};
+    use super::{
+        CliDefinition,
+        SmargsParserError,
+        SmargError,
+        Token,
+        HELP_FLAG,
+        HELP_WORD,
+    };
     type MINIMUM_PARSE_TYPE = (usize, u32);
+
+    /// Helper for building and asserting help with a minimum argument-list.
+    fn assert_help_string(args: impl IntoIterator<Item=String>) {
+        let help_str = "make something with a width";
+        assert!(
+            CliDefinition::new("Testing")
+                .instruct(help_str)
+                .required(&["width"], &['w'], "Width of the something")
+                .optional(&[], &[], "", "0")
+                .parse::<_, MINIMUM_PARSE_TYPE>(args)
+                .unwrap_err()
+                .to_string().to_lowercase().contains(help_str)
+        );
+    }
 
     #[test]
     fn test_position_only() {
@@ -702,8 +735,12 @@ mod cli_definition_tests {
                 .required(&["bar"], &['b'], "Bar")
                 .parse::<_, (u32, u32)>(args)
                 .unwrap_err();
-        assert!(err.to_string().to_lowercase().contains("unrecognized"));
-        assert!(err.to_string().to_lowercase().contains("baz"));
+        assert_eq!(
+            err,
+            SmargsParserError::Smarg(
+                SmargError::Unrecognized(Token::Word("baz".to_string()))
+            )
+        );
         // TODO Implement these messages.
         //assert!(err.to_string().to_lowercase().contains("did you mean"));
         //assert!(err.to_string().to_lowercase().contains("-b"));
@@ -736,65 +773,45 @@ mod cli_definition_tests {
     }
 
     #[test]
-    fn test_instruct() {
-        let help_str = "Make something with a width";
-
+    fn test_instruct_no_args() {
+        let args = "foo.exe"
+            .split(' ')
+            .map(String::from)
+            .collect::<Vec<String>>();
+        assert_help_string(args);
+    } 
+    
+    #[test]
+    fn test_instruct_flag() {
         let args_flag = format!("foo.exe -{}", HELP_FLAG)
             .split(' ')
             .map(String::from)
             .collect::<Vec<String>>();
+        assert_help_string(args_flag);
+    }
+
+    #[test]
+    fn test_instruct_word() {
         let args_word = format!("foo.exe --{}", HELP_WORD)
             .split(' ')
             .map(String::from)
             .collect::<Vec<String>>();
+        assert_help_string(args_word);
+    }
+
+    #[test]
+    fn test_instruct_mixed() {
         // NOTE Help overrides other options.
         let args_mixed = format!("foo.exe -w 42 -{}", HELP_FLAG)
             .split(' ')
             .map(String::from)
             .collect::<Vec<String>>();
-
-        assert!(
-            CliDefinition::new("Testing")
-                .instruct(help_str)
-                .required(&["width"], &['w'], "Width of the something")
-                .optional(&[], &[], "", "0")
-                .parse::<_, MINIMUM_PARSE_TYPE>(args_flag)
-                .unwrap_err()
-                .to_string().to_lowercase().contains(help_str)
-        );
-        assert!(
-            CliDefinition::new("Testing")
-                .instruct(help_str)
-                .required(&["width"], &['w'], "Width of the something")
-                .optional(&[], &[], "", "0")
-                .parse::<_, MINIMUM_PARSE_TYPE>(args_word)
-                .unwrap_err()
-                .to_string().to_lowercase().contains(help_str)
-        );
-        assert!(
-            CliDefinition::new("Testing")
-                .instruct(help_str)
-                .required(&["width"], &['w'], "Width of the something")
-                .optional(&[], &[], "", "0")
-                .parse::<_, MINIMUM_PARSE_TYPE>(args_mixed)
-                .unwrap_err()
-                .to_string().to_lowercase().contains(help_str)
-        );
-
-
-        let args = "foo.exe".split(' ').map(String::from);
-        let err = CliDefinition::new("Testing")
-            .instruct(help_str)
-            .required(&["width"], &['w'], "Width of the something")
-            .parse::<_, MINIMUM_PARSE_TYPE>(args)
-            .unwrap_err();
-
-        assert!(err.to_string().to_lowercase().contains(help_str));
+        assert_help_string(args_mixed);
     }
 
     #[test]
     fn test_instruct_order() {
-        let help_str = "Make something with a width";
+        let help_str = "make something with a width";
         let args = "foo.exe".split(' ').map(String::from);
         let err = CliDefinition::new("Testing")
             .instruct(help_str)
@@ -804,7 +821,7 @@ mod cli_definition_tests {
 
         assert!(err.to_string().to_lowercase().contains(help_str));
 
-        let help_str = "Make something with a width";
+        let help_str = "make something with a width";
         let args = "foo.exe".split(' ').map(String::from);
         let err = CliDefinition::new("Testing")
             .required(&["width"], &['w'], "Width of the something")
@@ -814,7 +831,7 @@ mod cli_definition_tests {
 
         assert!(err.to_string().to_lowercase().contains(help_str));
 
-        let help_str = "Make something with a width";
+        let help_str = "make something with a width";
         let args = "foo.exe".split(' ').map(String::from);
         let err = CliDefinition::new("Testing")
             .required(&["width"], &['w'], "Width of the something")
@@ -839,7 +856,7 @@ mod cli_definition_tests {
 
     #[test]
     fn test_instruct_option_overridden() {
-        let help_str = "Make something with a height";
+        let help_str = "make something with a height";
         let args = "foo.exe -h 42".split(' ').map(String::from);
         let err = CliDefinition::new("Testing")
             .instruct(help_str)
@@ -847,7 +864,10 @@ mod cli_definition_tests {
             .parse::<_, MINIMUM_PARSE_TYPE>(args)
             .unwrap_err();
 
-        assert!(err.to_string().to_lowercase().contains("ambiguous option"));
+        assert_eq!(
+            err,
+            SmargsParserError::Smarg(SmargError::Ambiguous(Token::Flag('h')))
+        );
     }
 
     #[test]
