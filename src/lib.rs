@@ -131,3 +131,24 @@ macro_rules! log {
         }
     };
 }
+
+/// Same as the `log`-macro, but color the output. TODO Would allowing the
+/// color to be suffixed to log-arguments be nicer ie.
+/// `log("foo {}", "bar", Color::Red)`?
+///
+/// # Example:
+/// ```
+/// use terminal_toys::{Color, color_log};
+/// color_log!(Color::Red, "This log is {}", "red");
+/// ```
+#[macro_export]
+macro_rules! color_log {
+    ($c:expr, $($message:expr),+) => {
+        if let Some(value) = option_env!("TTOYSLOG") {
+            if module_path!().split("::").any(|m| value.contains(m)) {
+                // Print message with its formatting
+                terminal_toys::color_println!($c, $($message),+);
+            }
+        }
+    };
+}
