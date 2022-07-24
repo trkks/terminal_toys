@@ -81,22 +81,28 @@ impl Color {
 ///     Color::Red,
 ///     "Hey {:A>6}, why the long {}?",
 ///     "Alice",
-///     if 1 < 2 { "face" } else { "phase" }
+///     if 1 < 2 { "face" } else { "phase" },
 /// );
+///
+/// color_print!(Color::Green, "foo");
 /// ```
 #[macro_export]
 macro_rules! color_print {
     // A Color and a string are mandatory arguments;
-    // latter starts a sequence that should work like the normal print macro
-    ($c:expr, $($x:expr),+) => {
-        // TODO should line-wrapping be considered?
-        // See https://tldp.org/HOWTO/Bash-Prompt-HOWTO/nonprintingchars.html
-        // Start the color
-        print!("\x1B[{}m", $c.code());
-        // Print normally
-        print!($($x),+);
-        // Reset the color back to normal
-        print!("\x1B[m");
+    // latter starts a sequence that should work like the normal print macro.
+    // The third match is for allowing optional trailing comma.
+    ($c:expr, $($x:expr),+ $(,)?) => {
+        {
+            // TODO should line-wrapping be considered?
+            // See
+            // https://tldp.org/HOWTO/Bash-Prompt-HOWTO/nonprintingchars.html
+            // Start the color
+            print!("\x1B[{}m", $c.code());
+            // Print normally
+            print!($($x),+);
+            // Reset the color back to normal
+            print!("\x1B[m");
+        }
     };
 }
 
@@ -104,13 +110,26 @@ macro_rules! color_print {
 /// # Example
 /// ```
 /// use terminal_toys::{Color, color_println};
-/// color_println!(Color::BrightRed, "RED");
+/// color_println!(
+///     Color::BrightRed,
+///     "Printing in {}",
+///     "RED",
+/// );
+///
+/// let opt = Some("foo");
+/// match opt {
+///     Some(s) => color_println!(Color::Green, "{}", s),
+///     None    => color_println!(Color::Red, "Not found"),
+/// }
 /// ```
 #[macro_export]
 macro_rules! color_println {
-    ($c:expr, $($x:expr),+) => {
-        terminal_toys::color_print!($c, $($x),+);
-        println!();
+    // The third match is for allowing optional trailing comma.
+    ($c:expr, $($x:expr),+ $(,)?) => {
+        {
+            terminal_toys::color_print!($c, $($x),+);
+            println!();
+        }
     };
 }
 
@@ -123,31 +142,36 @@ macro_rules! color_println {
 #[macro_export]
 macro_rules! log {
     ($($message:expr),+) => {
-        if let Some(value) = option_env!("TTOYSLOG") {
-            if module_path!().split("::").any(|m| value.contains(m)) {
-                // Print message with its formatting
-                println!($($message),+);
+        {
+            if let Some(value) = option_env!("TTOYSLOG") {
+                if module_path!().split("::").any(|m| value.contains(m)) {
+                    // Print message with its formatting
+                    println!($($message),+);
+                }
             }
         }
     };
 }
 
-/// Same as the `log`-macro, but color the output. TODO Would allowing the
-/// color to be suffixed to log-arguments be nicer ie.
-/// `log("foo {}", "bar", Color::Red)`?
+/// Same as the `log`-macro, but color the output according to color variable
+/// `TTOYSLOG_COLOR` found in scope.
+///
+/// NOTE The module to log from is required to contain a constant `Color` in
+/// the form `TTOYSLOG_COLOR`!
 ///
 /// # Example:
 /// ```
 /// use terminal_toys::{Color, color_log};
-/// color_log!(Color::Red, "This log is {}", "red");
+/// const TTOYSLOG_COLOR: Color = Color::Red;
+/// color_log!("This log is {}", "red");
 /// ```
 #[macro_export]
 macro_rules! color_log {
-    ($c:expr, $($message:expr),+) => {
+    ($($message:expr),+) => {
         if let Some(value) = option_env!("TTOYSLOG") {
             if module_path!().split("::").any(|m| value.contains(m)) {
                 // Print message with its formatting
-                terminal_toys::color_println!($c, $($message),+);
+                terminal_toys::color_println!(TTOYSLOG_COLOR, $($message),+);
             }
         }
     };
