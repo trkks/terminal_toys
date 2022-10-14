@@ -436,8 +436,9 @@ impl ops::Index<ops::RangeTo<usize>> for Smargs {
 #[cfg(test)]
 mod tests {
     use super::{Smargs, SmargsInitError, SmargError, Token};
+
     #[test]
-    fn test_smargs_use_case() {
+    fn general_use_case() {
         let smargs = Smargs::new(
             "scale_img.exe nn --verbose   -w 300 -h 300  --output scaled.png"
                 .split(' ').map(String::from)
@@ -482,74 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn test_smargs_first_last() {
-        let args = "foo.exe 42".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.first::<u32>().unwrap(), 42);
-        assert_eq!(smargs.last::<u32>().unwrap(), 42);
-
-        let args = "foo.exe 42 bar baz".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.first::<u32>().unwrap(), 42);
-        assert!(match smargs.last::<u32>().unwrap_err() {
-            SmargError::Parsing(_) => true,
-            _ => false,
-        });
-        assert_eq!(smargs.last::<String>().unwrap(), String::from("baz"));
-    }
-
-    #[test]
-    fn test_smargs_nth() {
-        let args = "foo.exe 42".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.nth::<u32>(0).unwrap(), 42);
-        assert_eq!(smargs.nth::<u32>(smargs.len() - 1).unwrap(), 42);
-
-        {
-            assert_eq!(smargs.len(), 1);
-            assert!(match smargs.nth::<u32>(1).unwrap_err() {
-                SmargError::Position(1) => true,
-                    _ => false,
-            });
-            // (Test that the inner list length does not effect.)
-            assert!(match smargs.nth::<u32>(2).unwrap_err() {
-                SmargError::Position(2) => true,
-                    _ => false,
-            });
-        }
-
-        let args = "foo.exe 42 bar baz".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-
-        assert_eq!(smargs.nth::<u32>(0).unwrap(), 42);
-        assert_eq!(smargs.nth::<String>(0).unwrap(), String::from("42"));
-
-        assert_eq!(smargs.nth::<String>(1).unwrap(), String::from("bar"));
-        assert!(match smargs.nth::<u32>(1).unwrap_err() {
-            SmargError::Parsing(_) => true,
-            _ => false,
-        });
-
-        assert_eq!(smargs.nth::<String>(2).unwrap(), String::from("baz"));
-    }
-
-    #[test]
-    fn test_smargs_exe() {
-        let args = "foo.exe".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert!(match smargs.first::<u32>().unwrap_err() {
-            SmargError::Position(0) => true,
-            _ => false,
-        });
-        assert!(match smargs.last::<u32>().unwrap_err() {
-            SmargError::Position(0) => true,
-            _ => false,
-        });
-        assert_eq!(smargs.exe(), &String::from("foo.exe"));
-    }
-
-    #[test]
-    fn test_smargs_duplicates() {
+    fn error_on_duplicates() {
         let args = "some.exe -fofo".split(' ').map(String::from);
         let double_flag = Smargs::new(args);
         // Catch the first duplicate that appears from left to right
@@ -576,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn test_combined_key_value() {
+    fn multicharacter_option() {
         let args = "some.exe -bar r-arg-value --bar"
             .split(' ')
             .map(String::from);
@@ -599,40 +533,8 @@ mod tests {
 
 
     #[test]
-    fn test_smargs_empty() {
+    fn error_on_empty() {
         let smargs = Smargs::new(std::iter::empty());
         assert_eq!(smargs, Err(SmargsInitError::Empty));
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_empty_key() {
-        let args = "some.exe foo".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs[""];
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_not_a_key() {
-        let args = "some.exe foo bar".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs["foo"];
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_index_out_of_bounds() {
-        let args = "some.exe foo bar".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs[2];
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_range_out_of_bounds() {
-        let args = "some.exe foo bar".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs[0..3];
     }
 }
