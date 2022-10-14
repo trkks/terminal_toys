@@ -213,6 +213,38 @@ pub struct Smargs {
     dict: HashMap<String, usize>,
 }
 impl Smargs {
+    /// TODO
+    pub fn builder(description: &str) -> Self {
+        todo!()
+    }
+
+    /// TODO
+    pub fn required(
+        mut self,
+        keys: Option<(&[char], &[&str])>,
+        description: &str,
+    ) -> Self {
+        todo!()
+    }
+
+    /// TODO
+    pub fn optional(
+        mut self,
+        keys: Option<(&[char], &[&str])>,
+        description: &str,
+        default: &str,
+    ) -> Self {
+        todo!()
+    }
+
+    /// TODO
+    pub fn parse<T>(
+        self,
+        args: impl Iterator<Item=String>,
+    ) -> Result<T, SmargsInitError> {
+        todo!()
+    }
+
     pub fn new(
         mut args: impl Iterator<Item = String>,
     ) -> Result<Self, SmargsInitError> {
@@ -435,106 +467,118 @@ impl ops::Index<ops::RangeTo<usize>> for Smargs {
 
 #[cfg(test)]
 mod tests {
-    use super::{Smargs, SmargsInitError, SmargError, Token};
+    use super::{Smargs, SmargsInitError, Token};
 
     #[test]
     fn general_use_case() {
-        let smargs = Smargs::new(
-            "scale_img.exe nn --verbose   -w 300 -h 300  --output scaled.png"
+        use std::path::PathBuf;
+
+        let (a1, a2, a3, a4, a5) :
+            (PathBuf, u32, u32, PathBuf, bool) =
+            Smargs::builder("A program to scale an image")
+            .required(None, "Path to the image")
+            .required(Some((&['w'], &["width"])), "The width to scale into")
+            .required(Some((&['h'], &["height"])), "The height to scale into")
+            .optional(Some((&['o'], &["output"])), "Output path", "a")
+            .optional(
+                Some((&['v'], &["verbose"])),
+                "Print realtime status of operations",
+                &true.to_string()
+            )
+            .parse(
+                "scale_img.exe ./img.png -v -w 1366 -h 768 --output scaled.png"
                 .split(' ').map(String::from)
-        ).unwrap();
+            )
+            .unwrap();
 
-        let indexable_args = vec![
-            "nn", "--verbose", "-w", "300",
-            "-h", "300", "--output", "scaled.png",
-        ];
-
-        assert_eq!(smargs[0], indexable_args[0]);
-        assert_eq!(smargs[1], indexable_args[1]);
-        assert_eq!(smargs[2], indexable_args[2]);
-        assert_eq!(smargs[3], indexable_args[3]);
-        assert_eq!(smargs[4], indexable_args[4]);
-        assert_eq!(smargs[5], indexable_args[5]);
-        assert_eq!(smargs[6], indexable_args[6]);
-        assert_eq!(smargs[7], indexable_args[7]);
-
-        // TODO Is this functionality even useful?
-        // Is supporting the original arg-list necessary?
-        assert_eq!(smargs[..], smargs[0..]);
-        assert_eq!(smargs[0..], smargs[..8]);
-        assert_eq!(smargs[..8], smargs[0..8]);
-        assert_eq!(smargs[0..8], indexable_args[0..8]);
-
-        assert_eq!(smargs[2..6], indexable_args[2..6]);
-        assert_eq!(smargs[3..3], indexable_args[3..3]);
-
-        assert_eq!(smargs["h"], "300");
-        assert_eq!(smargs["w"], "300");
-        assert_eq!(smargs["output"], "scaled.png");
-        assert_eq!(smargs["verbose"], "true");
-        assert!(smargs.has("verbose"));
-        assert!(!smargs.has("v"));
-        assert_eq!(smargs.first::<String>().unwrap(), smargs[0]);
-        assert_eq!(smargs.first::<String>().unwrap(), String::from("nn"));
-        assert_eq!(
-            smargs.last::<std::path::PathBuf>().unwrap(),
-            std::path::PathBuf::from("scaled.png")
-        );
+        assert_eq!(a1, "./img.png".parse::<PathBuf>().unwrap());
+        assert_eq!(a2, 1366);
+        assert_eq!(a3, 768);
+        assert_eq!(a4, "scaled.png".parse::<PathBuf>().unwrap());
+        assert!(a5);
     }
 
     #[test]
     fn error_on_duplicates() {
-        let args = "some.exe -fofo".split(' ').map(String::from);
-        let double_flag = Smargs::new(args);
-        // Catch the first duplicate that appears from left to right
+        // Catch the __first__ duplicate that appears from left to right.
+
+        let err_duplicate = Smargs::builder("Test program")
+            .optional(Some((&['f'], &[])), "Foo", &false.to_string())
+            .optional(Some((&['b'], &[])), "Bar", &true.to_string())
+            .parse::<(bool, bool)>("a -fbfb".split(' ').map(String::from))
+            .unwrap_err();
         assert_eq!(
-            double_flag,
-            Err(SmargsInitError::Duplicate(Token::Flag('f')))
+            err_duplicate,
+            SmargsInitError::Duplicate(Token::Flag('f'))
         );
 
-        let args = "some.exe --foo --foo --bar --bar".split(' ')
-            .map(String::from);
-        let double_word = Smargs::new(args);
+        let err_duplicate = Smargs::builder("Test program")
+            .optional(Some((&[], &["foo"])), "Foo", &false.to_string())
+            .optional(Some((&[], &["bar"])), "Bar", &true.to_string())
+            .parse::<(bool, bool)>(
+                "a --foo --foo --bar --bar".split(' ').map(String::from)
+            )
+            .unwrap_err();
         assert_eq!(
-            double_word,
-            Err(SmargsInitError::Duplicate(Token::Word(String::from("foo"))))
+            err_duplicate,
+            SmargsInitError::Duplicate(Token::Word(String::from("foo")))
         );
 
-        let args = "some.exe -fo -of --bar --bar".split(' ')
-            .map(String::from);
-        let double_flag = Smargs::new(args);
+        let err_duplicate = Smargs::builder("Test program")
+            .optional(Some((&['f'], &[])), "Foo", &false.to_string())
+            .optional(Some((&['b'], &[])), "Bar", &true.to_string())
+            .optional(Some((&[], &["baz"])), "Baz", &true.to_string())
+            .parse::<(bool, bool, bool)>(
+                "a -fb --baz -bf --baz".split(' ').map(String::from)
+            )
+            .unwrap_err();
         assert_eq!(
-            double_flag,
-            Err(SmargsInitError::Duplicate(Token::Flag('o')))
+            err_duplicate,
+            SmargsInitError::Duplicate(Token::Flag('b'))
         );
     }
 
     #[test]
     fn multicharacter_option() {
-        let args = "some.exe -bar r-arg-value --bar"
-            .split(' ')
-            .map(String::from);
-        let diff_types = Smargs::new(args).unwrap();
-        assert_eq!(diff_types["b"].parse::<bool>().unwrap(), true);
-        assert_eq!(diff_types["a"].parse::<bool>().unwrap(), true);
-        assert_eq!(diff_types["r"], "r-arg-value");
-        assert_eq!(diff_types["bar"].parse::<bool>().unwrap(), true);
+        let (b, a, r, bar) :
+            (bool, bool, String, bool) =
+            Smargs::builder("Test program")
+            .optional(Some((&['b'], &[])), "Bee", &false.to_string())
+            .optional(Some((&['a'], &[])), "Ay", &false.to_string())
+            .optional(Some((&['r'], &[])), "Are", "some-default")
+            .optional(Some((&[], &["bar"])), "Bar", &false.to_string())
+            .parse("a -bar r-arg-value --bar".split(' ').map(String::from))
+            .unwrap();
+        assert!(b);
+        assert!(a);
+        assert_eq!(r, "r-arg-value");
+        assert!(bar);
 
-        let args = "some.exe -bar --verbose -f 4.2"
-            .split(' ')
-            .map(String::from);
-        let multiple = Smargs::new(args).unwrap();
-        assert_eq!(multiple["b"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["a"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["r"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["verbose"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["f"].parse::<f32>().unwrap(), 4.2);
+        let (b, a, r, verbose, f) :
+            (bool, bool, bool, bool, f32) =
+            Smargs::builder("Test program")
+            .optional(Some((&['b'], &[])), "Bee", &false.to_string())
+            .optional(Some((&['a'], &[])), "Ay", &false.to_string())
+            .optional(Some((&['r'], &[])), "Are", &false.to_string())
+            .optional(Some((&[], &["verbose"])), "Verbose", &false.to_string())
+            .optional(Some((&['f'], &[])), "Foo", "666")
+            .parse("a -bar --verbose -f 4.2".split(' ').map(String::from))
+            .unwrap();
+        assert!(a);
+        assert!(b);
+        assert!(r);
+        assert!(verbose);
+        assert_eq!(f, 4.2);
     }
 
 
     #[test]
     fn error_on_empty() {
-        let smargs = Smargs::new(std::iter::empty());
-        assert_eq!(smargs, Err(SmargsInitError::Empty));
+        let err_empty = Smargs::builder("Test program")
+            .optional(Some((&['f'], &[])), "Foo", &false.to_string())
+            .optional(Some((&['b'], &[])), "Bar", &true.to_string())
+            .parse::<(bool, bool)>(std::iter::empty())
+            .unwrap_err();
+        assert_eq!(err_empty, SmargsInitError::Empty);
     }
 }
