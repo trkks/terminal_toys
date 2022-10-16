@@ -134,62 +134,47 @@ pub enum SmargKind {
 #[derive(Debug)]
 pub struct StringVec(Vec<String>);
 
-// TODO Parse options from some parameters eg. [Bool("-v", "--verbose", "Print
-// detailed information"), OsPath("-p", "--path", "Path to source file"), ...]
-// smargs = Smargs::new(options_list, env::args())
 /// SiMpler thAn wRiting it once aGain Surely :)
-/// PlaceS strings received froM std::env::ARGS into Suitable structures for
-/// straightforward operation of flags, ordered and naMed ARGumentS.
 ///
-/// # Example:
+/// # Examples:
+/// Here the execution of a program is guided by command-line arguments in
+/// order to create the string `(foo bar, foo bar, foo bar)`.
 /// ```
-/// use terminal_toys::smargs::{Smargs, SmargError as Se};
-/// use std::error;
+/// # fn main() -> Result<(), String> {
+/// let (n, s, verbose) : (usize, String, bool) =
+///     terminal_toys::Smargs::builder("Tupletize!")
+///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
+///         .required(None, "The string to repeat")
+///         .optional(Some((&['v'], &[])), "Print information about the result", "false")
+///         .parse(
+///             vec!["tupletize.exe", "-v", "--amount", "3", "foo bar"]
+///                 .into_iter().map(String::from)
+///         )
+///         .map_err(|e| format!("Argument failure: {}", e))?;
 ///
-/// fn get_args(
-///     smargs: &Smargs,
-/// ) -> Result<(String, usize), Box<dyn error::Error>> {
-///     Ok((smargs.last()?, smargs.gets(&["amount", "a"])?))
+/// let result = format!("({})", vec![s.clone(); n].join(", "));
+///
+/// if verbose {
+///     println!("Character count: {}", result.len()); // Character count: 27
 /// }
 ///
-/// let smargs = terminal_toys::Smargs::new(
-///     "tupletize.exe -v --amount 3 foo".split(' ').map(String::from)
-/// ).unwrap();
-///
-/// let (target, n) = match get_args(&smargs) {
-///     Err(e) => panic!("Argument failure: {}", e),
-///     Ok(x)  => x,
-/// };
-///
-/// let mut result = String::from("()");
-/// if n > 0 {
-///     result = format!("({})", vec![target.clone(); n].join(", "));
-///
-///     if smargs.has("v") {
-///         // Prints: "tupletize.exe: Result is 15 characters"
-///         println!(
-///             "{}: Result is {} characters",
-///             smargs.exe(), result.len()
-///         );
-///     }
-/// }
-///
-/// assert_eq!(result, "(foo, foo, foo)");
+/// assert_eq!(result, "(foo bar, foo bar, foo bar)".to_owned());
+/// # Ok(()) }
 /// ```
-/// Or with just ordered arguments:
+/// Or with just ordered arguments and the verbose flag defaulted to `true`:
 /// ```
-/// let smargs = terminal_toys::Smargs::new(
-///     "tupletize.exe 3 foo -v".split(' ').map(String::from)
-/// ).unwrap();
-/// match &smargs[..2] {
-///     []  => { /* Print instructions */ },
-///     [n] => { /* ... */},
-///     [n, target, ..] => {
-///         assert_eq!(n, "3");
-///         assert_eq!(target, "foo");
-///         // ...
-///     },
-/// }
+/// let (n, s, verbose) : (usize, String, bool) =
+///     terminal_toys::Smargs::builder("Tupletize!")
+///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
+///         .required(None, "The string to repeat")
+///         .optional(Some((&['v'], &[])), "Print information about the result", "true")
+///         .parse(
+///             vec!["tupletize.exe", "3", "foo bar"].into_iter().map(String::from)
+///         )
+///         .unwrap();
+/// assert_eq!(n, 3);
+/// assert_eq!(s, "foo bar");
+/// assert!(verbose);
 /// ```
 #[derive(Debug)]
 pub struct Smargs {
@@ -198,47 +183,35 @@ pub struct Smargs {
 }
 
 impl Smargs {
-    /// TODO
+    /// Start a builder defining the order, keys and description of a program
+    /// and its arguments.
+    ///
+    /// `description` is the general description of the program.
     pub fn builder(description: &str) -> Self {
         Self { defins: Vec::new(), values: StringVec(Vec::new()) }
     }
 
-    /// TODO
+    /// Define next an argument which __needs__ to be provided by the user.
     pub fn required(
         mut self,
         keys: Option<(&[char], &[&str])>,
         description: &str,
     ) -> Self {
-        let keys = if let Some((cs, ss)) = keys {
-            iter::once(cs.iter().collect::<String>())
-                .chain(ss.iter().map(|y| y.to_string()))
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        self.defins.push(Smarg { keys, kind: SmargKind::Required });
-
+        self.push_arg(keys, description, SmargKind::Required);
         self
     }
 
-    /// TODO
+    /// Define next an argument with a default value that will be used if
+    /// nothing is provided by the user.
     pub fn optional(
         mut self,
         keys: Option<(&[char], &[&str])>,
         description: &str,
         default: &str,
     ) -> Self {
-        let keys = if let Some((cs, ss)) = keys {
-            iter::once(cs.iter().collect::<String>())
-                .chain(ss.iter().map(|y| y.to_string()))
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        self.defins.push(Smarg { keys, kind: SmargKind::Optional(default.to_owned()) });
-
+        self.push_arg(
+            keys, description, SmargKind::Optional(default.to_owned())
+        );
         self
     }
 
@@ -253,6 +226,11 @@ impl Smargs {
     {
         let am = ArgMap::new(args)?;
 
+        // Populate the list of values by trying to find a matching value
+        // from args or based on "strategy" of the SmargKind.
+
+        // Fill correct indices based on keys first and position second.
+        // FIXME Does not work when key and positional arguments are mixed.
         for (i, Smarg { keys, kind }) in self.defins.iter().enumerate() {
             // Try to find a matching value from args.
             self.values.0.push(
@@ -280,6 +258,25 @@ impl Smargs {
         self.parse(std::env::args())
     }
 
+    /// Perform common operations for defining an argument in order
+    /// and TODO: generate a user-friendly description for it.
+    fn push_arg(
+        &mut self,
+        keys: Option<(&[char], &[&str])>,
+        description: &str,
+        kind: SmargKind,
+    ) {
+        let keys = if let Some((cs, ss)) = keys {
+            iter::once(cs.iter().collect::<String>())
+                .chain(ss.iter().map(|y| y.to_string()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        self.defins.push(Smarg { keys, kind });
+    }
+
     fn parse_nth<T>(&self, index: usize) -> Result<T, Error>
     where
         T: FromStr,
@@ -296,7 +293,7 @@ impl Smargs {
                 true.to_string()
                     .parse()
                     // Guessing the type was wrong so return the initial error.
-                    .map_err(|_| Error::Parsing(first_err.to_string()))
+                    .map_err(|_| Error::Parsing(format!("#{} {}", index, first_err.to_string())))
             )
     }
 }
@@ -408,19 +405,19 @@ mod tests {
         use std::path::PathBuf;
 
         let (a1, a2, a3, a4, a5) :
-            (PathBuf, u32, u32, PathBuf, bool) =
+            (PathBuf, u32, u32, bool, PathBuf) =
             Smargs::builder("A program to scale an image")
             .required(None, "Path to the image")
             .required(Some((&['w'], &["width"])), "The width to scale into")
             .required(Some((&['h'], &["height"])), "The height to scale into")
-            .optional(Some((&['o'], &["output"])), "Output path", "a")
             .optional(
                 Some((&['v'], &["verbose"])),
                 "Print realtime status of operations",
                 &true.to_string()
             )
+            .optional(Some((&['o'], &["output"])), "Output path", "a")
             .parse(
-                "scale_img.exe ./img.png -v -w 1366 -h 768 --output scaled.png"
+                "scale_img.exe -v ./img.png -w 1366 -h 768 --output scaled.png"
                 .split(' ').map(String::from)
             )
             .unwrap();
@@ -428,8 +425,8 @@ mod tests {
         assert_eq!(a1, "./img.png".parse::<PathBuf>().unwrap());
         assert_eq!(a2, 1366);
         assert_eq!(a3, 768);
-        assert_eq!(a4, "scaled.png".parse::<PathBuf>().unwrap());
-        assert!(a5);
+        assert!(a4);
+        assert_eq!(a5, "scaled.png".parse::<PathBuf>().unwrap());
     }
 
     #[test]
