@@ -6,148 +6,111 @@ use std::ops;
 use std::str;
 
 
-/// Error type for `Smargs`'s constructors.
-///
-/// `SmargsInitError::Duplicate` can be used to tell the caller which argument
-/// was a duplicate and its token-type.
-#[derive(Debug, PartialEq)]
-pub enum SmargsInitError {
+/// Error type for getting and parsing the values of arguments.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error {
     Empty,
-    Duplicate(Token),
+    Duplicate(String),
 }
-
 
 /// Offer nicer error-messages to user.
 /// Implementing `Display` is also needed for `std::error::Error`.
-impl fmt::Display for SmargsInitError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
             Self::Empty => String::from("No arguments found"),
             // TODO impl Display for Token
-            Self::Duplicate(t) => format!("Duplicate entry of {:?}", t),
+            Self::Duplicate(s) => format!("Duplicate entry of '{}'", s),
         };
         write!(f, "{}", msg)
     }
 }
 
+impl error::Error for Error {}
 
-impl error::Error for SmargsInitError {}
-
-type SmargResult<T> = Result<T, SmargError<T>>;
-
-/// Error type for getting and parsing the values of arguments.
-#[derive(Debug)]
-pub enum SmargError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug
-{
-    Key { flags: Vec<char>, words: Vec<String> },
-    Position(usize),
-    Parsing(<T as str::FromStr>::Err),
+/// A mapping from keys to indices to strings:
+/// > ArgMap[Key] == Index -> ArgMap[Index] == String
+/// Key-value pairs are roughly based on the rough syntax:
+/// > Key := -Alph Value | --Alph Value
+/// Value is a superset of Alph, which means is not always clear when a string
+/// is a key or a value. This means, that some strings meant as values for
+/// example "--my-username--" will be presented as being keys. However for
+/// example "-42" is strictly considered a value.
+struct ArgMap {
+    list: Vec<String>,
+    dict: HashMap<String, usize>,
 }
-impl<T> SmargError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
-{
-    /// Return if failed to get argument because it was not found.
-    ///
-    /// Example:
-    /// ```
-    /// use terminal_toys::smargs::{Smargs, SmargError as Se};
-    /// let smargs = Smargs::new(
-    ///         "foo.exe -bar --baz".split(' ').map(String::from)
-    ///     ).unwrap();
-    ///
-    /// let (pos, key) = (smargs.nth::<u32>(2), smargs.gets::<u32>(&["qux"]));
-    ///
-    /// assert!(pos.is_err() && key.is_err());
-    /// assert!(pos.unwrap_err().is_not_found());
-    /// assert!(key.unwrap_err().is_not_found());
-    /// ```
-    pub fn is_not_found(&self) -> bool {
-        match self {
-            Self::Parsing(_) => false,
-            _ => true,
-        }
-    }
 
-    /// Create the Key-variant based on the argument keys passed in.
-    /// `SmargError` uses this function in creating a better error message.
-    ///
-    /// Example:
-    /// ```
-    /// use terminal_toys::smargs::{Smargs, SmargError as Se};
-    /// let smargs = Smargs::new(
-    ///         "foo.exe -bar --baz".split(' ').map(String::from)
-    ///     ).unwrap();
-    /// let notfound_err_msg = smargs.gets::<i32>(&["output", "out", "o"])
-    ///     .unwrap_err()
-    ///     .to_string();
-    /// assert!(notfound_err_msg.contains("output"));
-    /// assert!(notfound_err_msg.contains("out"));
-    /// assert!(notfound_err_msg.contains("o"));
-    /// // TODO Position of the argument (in the order of the gets-query?).
-    /// ```
-    fn not_found(keys: &[&str]) -> Self {
-        let mut words = Vec::new();
-        let mut flags = Vec::new();
-        // TODO Could allocations be reduced by passing keys intelligentler?
-        for key in keys {
-            if key.len() == 1 {
-                flags.push(key.chars().next().unwrap());
-            } else if key.len() > 1 {
-                words.push(String::from(*key));
+impl ArgMap {
+    /// Collect the strings in `args` into a list and map ones that __might__
+    /// be keys to their corresponding value's index in said list.
+    fn new(
+        args: impl Iterator<Item = String>,
+    ) -> Result<ArgMap, Error> {
+        // Contains the original arguments as is.
+        let list: Vec<String> = args.collect();
+
+        // Get all the (possible) key-value pairs of the argument list.
+        // TODO This could be snappier as an `iterator.collect()`, but couldn't
+        // figure it out.
+        let mut dict = HashMap::with_capacity(list.len());
+        for (key, value) in list.iter()
+            // Enumerate to save a handle to original list index.
+            .enumerate()
+            // Skip the executable. The 0-index is special.
+            .skip(1)
+            // Remove now unneeded values from inbetween and calculate the
+            // correct index handle (out of bounds wraps to 0).
+            .filter_map(|(i, s)| match Self::key_prefix_len(s) {
+                0 => None,
+                n => Some(((i + 1) % list.len(), s, n)),
+            })
+            // Remove the cli-syntax off of keys and handle the possibility of
+            // multi-character groups.
+            .fold(Vec::with_capacity(list.len()), |mut acc, (i, s, n)| {
+                if n == 1 {
+                    // Handle the possibility of multi-character group.
+                    acc.extend(
+                        s.chars()
+                            .skip(1)
+                            .map(|c| (c.to_string(), i))
+                    );
+                } else {
+                    acc.push((s.chars().skip(n).collect(), i));
+                }
+                acc
+            })
+        {
+            // Insert into dict and Err if key was already found.
+            if let Some(_) = dict.insert(key.clone(), value) {
+                return Err(Error::Duplicate(key))
             }
         }
-        Self::Key { words, flags }
+
+        Ok(ArgMap { list, dict })
+    }
+
+    fn key_prefix_len(s: &str) -> usize {
+        let prefix_len = s.chars().take(2).take_while(|c| *c == '-').count();
+        if let Some(fst_char_of_key) = s.chars().skip(prefix_len).next() {
+            if !fst_char_of_key.is_ascii_digit() {
+                return prefix_len
+            }
+        }
+        0
+    }
+
+    /// Return the first matching "token" (TODO) based on some keys.
+    fn get(&self, keys: &[&str]) -> Option<&String> {
+        keys.iter()
+            .find_map(|key|
+                self.dict
+                    .get(*key)
+                    .map(|&i| self.list.get(i))
+                    .flatten()
+            )
     }
 }
-
-
-
-/// Offer nicer error-messages to user.
-/// Implementing `Display` is also needed for `std::error::Error`.
-impl<T> fmt::Display for SmargError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let msg = match self {
-            Self::Key { flags, words } => format!(
-                    "option not found {}{}",
-                    flags.iter()
-                        .map(|c| format!(" -{}", c))
-                        .collect::<String>(),
-                    words.iter()
-                        .map(|s| format!(" --{}", s))
-                        .collect::<String>(),
-                ),
-            Self::Position(i) => format!("position not in bounds: {}", i),
-            Self::Parsing(err) => format!("bad format: {:?}", err),
-        };
-        write!(f, "{}", msg)
-    }
-}
-
-
-impl<T> error::Error for SmargError<T>
-where
-    T: str::FromStr + fmt::Debug,
-    <T as str::FromStr>::Err: fmt::Debug,
-{}
-
-
-/// Makes handling the args -strings a bit clearer
-#[derive(Debug, PartialEq, Clone)]
-pub enum Token {
-    Value(String),
-    Flag(char),
-    Word(String),
-}
-
 
 // TODO Parse options from some parameters eg. [Bool("-v", "--verbose", "Print
 // detailed information"), OsPath("-p", "--path", "Path to source file"), ...]
@@ -208,10 +171,8 @@ pub enum Token {
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct Smargs {
-    exe: String,
-    list: Vec<String>,
-    dict: HashMap<String, usize>,
 }
+
 impl Smargs {
     /// TODO
     pub fn builder(description: &str) -> Self {
@@ -237,237 +198,38 @@ impl Smargs {
         todo!()
     }
 
-    /// TODO
+    /// Parse the argument strings into the type `T` according to `self`.
     pub fn parse<T>(
         self,
         args: impl Iterator<Item=String>,
-    ) -> Result<T, SmargsInitError> {
+    ) -> Result<T, Error> {
         todo!()
     }
 
-    pub fn new(
-        mut args: impl Iterator<Item = String>,
-    ) -> Result<Self, SmargsInitError> {
-        let exe = args.next().ok_or(SmargsInitError::Empty)?;
-
-        // Contains the original arguments without empty ones
-        // TODO parse into typed enums
-        let list: Vec<String> =
-            args.filter_map(|x| {
-                    let xx = String::from(x.trim());
-                    if xx.is_empty() { None } else { Some(xx) }
-                })
-                // Hide a "boolean" to last index
-                .chain(iter::once(true.to_string()))
-                .collect();
-
-        // Tokenize and enumerate with original indices (ie. flag groups like
-        // "-bar" count as one index)
-        // NOTE that the added boolean in last index is also tokenized so that
-        // the next dict-loop wraps up nicely
-        let mut tokens = Vec::with_capacity(list.len());
-        for (i, s) in list.iter().enumerate() {
-            if s.starts_with("--") {
-                tokens.push(
-                    (i, Token::Word(s.chars().skip(2).collect()))
-                );
-            } else if s.starts_with("-") {
-                // Possible flag group
-                tokens.extend(
-                    s.chars()
-                        .skip(1)
-                        .map(|c| (i, Token::Flag(c)))
-                );
-            } else {
-                tokens.push(
-                    (i, Token::Value(String::from(s)))
-                );
-            }
-        }
-
-        let mut dict = HashMap::with_capacity(tokens.len());
-        // Emulate old school for-loop because Rust is so expressive /s
-        let mut i = 0;
-        while i < tokens.len().saturating_sub(1) {
-            let current_token = &tokens[i].1;
-            let (k, next_token) = &tokens[i + 1];
-
-            // Check if left side of pair is a key
-            let kv_opt = match current_token {
-                Token::Flag(chr) => Some(chr.to_string()),
-                Token::Word(s)   => Some(s.clone()),
-                _ => None,
-            }
-            // If it was, it will map to a value in resulting dict
-            .zip(Some(
-                if let Token::Value(_) = next_token {
-                    // Do not check if this Value is a key next iteration
-                    // This is literally the only reason for not using for-loop
-                    i += 1;
-                    // Point at the following Value in the original list
-                    *k
-                } else {
-                    // Key without following value points to the boolean
-                    list.len() - 1
-                }
-            ));
-
-            // Insert into dict and Err if key was already found
-            if let Some((key, value)) = kv_opt {
-                if let Some(_value) = dict.insert(key, value) {
-                    return Err(
-                        SmargsInitError::Duplicate(current_token.clone())
-                    )
-                }
-            }
-
-            i += 1;
-        }
-
-        Ok(Smargs { list, dict, exe })
-    }
-
-    /// Creates `Smargs` from a call to `std::env::args`.
-    pub fn from_env() -> Result<Self, SmargsInitError> {
-        Self::new(std::env::args())
-    }
-
-    pub fn exe(&self) -> &String {
-        &self.exe
-    }
-
-    pub fn len(&self) -> usize {
-        // Do not include the "boolean" at the end
-        &self.list.len() - 1
-    }
-
-    /// Parse and return the nth item in list.
-    /// TODO Should the return value be strictly from the _values_ (ie. the
-    /// arguments) or can the options and values be returned "mixed"?
-    pub fn nth<T>(&self, index: usize) -> SmargResult<T>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        // Do not include the "boolean" at the end
-        Self::parse_arg(
-            self.list[..self.list.len() - 1]
-                .get(index)
-                .ok_or(SmargError::Position(index))?
-        )
-    }
-
-    pub fn first<T>(&self) -> SmargResult<T>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        // Do not include the "boolean" at the end
-        Self::parse_arg(
-            self.list[..self.list.len() - 1]
-                .first()
-                .ok_or(SmargError::Position(0))?
-        )
-    }
-
-    pub fn last<T>(&self) -> SmargResult<T>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        // Do not include the "boolean" at the end
-        Self::parse_arg(
-            self.list[..self.list.len() - 1]
-                .last()
-                // NOTE It's dumb to return N - 1, as the list is empty anyway.
-                .ok_or(SmargError::Position(self.list.len() - 1))?
-        )
-    }
-
-    /// Return the matching value based on a list of keys.
-    // TODO Also keep a record of the order of calls to this (see
-    // GetsError::not_found) -> which would need the values to be removed from
-    // the smargs-instance.
-    pub fn gets<T>(&self, keys: &[&str]) -> Result<T, SmargError<T>>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        for &key in keys {
-            if let Some(s)
-                = self.dict.get(key)
-                    .map(|&i| self.list.get(i))
-                    .flatten()
-            {
-                return Self::parse_arg(s)
-            }
-        }
-        return Err(SmargError::not_found(keys))
-    }
-
-    pub fn has(&self, key: &str) -> bool {
-        self.dict.contains_key(key)
-    }
-
-    fn parse_arg<T>(arg: &str) -> SmargResult<T>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        arg.parse::<T>().map_err(|e| SmargError::Parsing(e))
+    /// Creates `T` based on a call to `std::env::args`.
+    pub fn from_env<T>(self) -> Result<T, Error> {
+        self.parse(std::env::args())
     }
 }
-
-impl ops::Index<&str> for Smargs {
-    type Output = String;
-    fn index(&self, key: &str) -> &Self::Output {
-        &self.list[self.dict[key]]
-    }
-}
-
-/// NOTE Indexes excluding the executable path; use `Smargs::exe` if it's needed
-impl ops::Index<usize> for Smargs {
-    type Output = String;
-    fn index(&self, user_index: usize) -> &Self::Output {
-        // Do not index the "boolean" at the end
-        &self.list[0..self.list.len() - 1][user_index]
-    }
-}
-
-/// NOTE Indexes excluding the executable path; use `Smargs::exe` if it's needed
-impl ops::Index<ops::Range<usize>> for Smargs {
-    type Output = [String];
-    fn index(&self, user_range: ops::Range<usize>) -> &Self::Output {
-        // Do not index the "boolean" at the end
-        &self.list[0..self.list.len() - 1][user_range]
-    }
-}
-
-impl ops::Index<ops::RangeFull> for Smargs {
-    type Output = [String];
-    fn index(&self, _: ops::RangeFull) -> &Self::Output {
-        &self[0..self.list.len() - 1]
-    }
-}
-
-impl ops::Index<ops::RangeFrom<usize>> for Smargs {
-    type Output = [String];
-    fn index(&self, user_range: ops::RangeFrom<usize>) -> &Self::Output {
-        &self[user_range.start..self.list.len() - 1]
-    }
-}
-
-impl ops::Index<ops::RangeTo<usize>> for Smargs {
-    type Output = [String];
-    fn index(&self, user_range: ops::RangeTo<usize>) -> &Self::Output {
-        &self[0..user_range.end]
-    }
-}
-
 
 #[cfg(test)]
 mod tests {
-    use super::{Smargs, SmargsInitError, Token};
+    use super::{Smargs, ArgMap, Error};
+
+    #[test]
+    fn argmap_use_case() {
+        let am = ArgMap::new(
+            "scale_img.exe ./img.png -v -w 1366 -h 768 --output scaled.png"
+                .split(' ')
+                .map(String::from)
+            )
+            .unwrap();
+
+        assert_eq!(am.dict["v"], 3);
+        assert_eq!(am.dict["w"], 4);
+        assert_eq!(am.dict["h"], 6);
+        assert_eq!(am.dict["output"], 8);
+    }
 
     #[test]
     fn general_use_case() {
@@ -509,7 +271,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err_duplicate,
-            SmargsInitError::Duplicate(Token::Flag('f'))
+            Error::Duplicate("f".to_owned())
         );
 
         let err_duplicate = Smargs::builder("Test program")
@@ -521,7 +283,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err_duplicate,
-            SmargsInitError::Duplicate(Token::Word(String::from("foo")))
+            Error::Duplicate("foo".to_owned()),
         );
 
         let err_duplicate = Smargs::builder("Test program")
@@ -534,12 +296,12 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err_duplicate,
-            SmargsInitError::Duplicate(Token::Flag('b'))
+            Error::Duplicate("b".to_owned()),
         );
     }
 
     #[test]
-    fn multicharacter_option() {
+    fn multi_character_option() {
         let (b, a, r, bar) :
             (bool, bool, String, bool) =
             Smargs::builder("Test program")
@@ -579,6 +341,6 @@ mod tests {
             .optional(Some((&['b'], &[])), "Bar", &true.to_string())
             .parse::<(bool, bool)>(std::iter::empty())
             .unwrap_err();
-        assert_eq!(err_empty, SmargsInitError::Empty);
+        assert_eq!(err_empty, Error::Empty);
     }
 }
