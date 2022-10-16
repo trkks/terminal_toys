@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::error;
 use std::fmt;
 use std::iter;
-use std::ops;
-use std::str;
+use std::str::FromStr;
+use std::convert::TryFrom;
 
 
 /// Error type for getting and parsing the values of arguments.
@@ -11,6 +11,9 @@ use std::str;
 pub enum Error {
     Empty,
     Duplicate(String),
+    Parsing(String),
+    Position(usize),
+    Required(usize, Vec<String>),
 }
 
 /// Offer nicer error-messages to user.
@@ -21,6 +24,9 @@ impl fmt::Display for Error {
             Self::Empty => String::from("No arguments found"),
             // TODO impl Display for Token
             Self::Duplicate(s) => format!("Duplicate entry of '{}'", s),
+            Self::Parsing(s) => format!("Failed to parse: {}", s),
+            Self::Position(i) => format!("Argument index {} out of bounds for required type", i),
+            Self::Required(i, keys) => format!("This argument is required: position {}, keys {:?}", i, keys),
         };
         write!(f, "{}", msg)
     }
@@ -49,6 +55,7 @@ impl ArgMap {
     ) -> Result<ArgMap, Error> {
         // Contains the original arguments as is.
         let list: Vec<String> = args.collect();
+        if list.is_empty() { return Err(Error::Empty) }
 
         // Get all the (possible) key-value pairs of the argument list.
         // TODO This could be snappier as an `iterator.collect()`, but couldn't
@@ -100,17 +107,32 @@ impl ArgMap {
         0
     }
 
-    /// Return the first matching "token" (TODO) based on some keys.
-    fn get(&self, keys: &[&str]) -> Option<&String> {
+    /// Return the first matching "token" based on some keys.
+    fn get(&self, keys: &[String]) -> Option<&String> {
         keys.iter()
             .find_map(|key|
                 self.dict
-                    .get(*key)
+                    .get(key)
                     .map(|&i| self.list.get(i))
                     .flatten()
             )
     }
 }
+
+#[derive(Debug)]
+pub struct Smarg {
+    keys: Vec<String>,
+    kind: SmargKind,
+}
+
+#[derive(Debug)]
+pub enum SmargKind {
+    Required,
+    Optional(String),
+}
+
+#[derive(Debug)]
+pub struct StringVec(Vec<String>);
 
 // TODO Parse options from some parameters eg. [Bool("-v", "--verbose", "Print
 // detailed information"), OsPath("-p", "--path", "Path to source file"), ...]
@@ -169,14 +191,16 @@ impl ArgMap {
 ///     },
 /// }
 /// ```
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Smargs {
+    defins: Vec<Smarg>,
+    values: StringVec,
 }
 
 impl Smargs {
     /// TODO
     pub fn builder(description: &str) -> Self {
-        todo!()
+        Self { defins: Vec::new(), values: StringVec(Vec::new()) }
     }
 
     /// TODO
@@ -185,7 +209,17 @@ impl Smargs {
         keys: Option<(&[char], &[&str])>,
         description: &str,
     ) -> Self {
-        todo!()
+        let keys = if let Some((cs, ss)) = keys {
+            iter::once(cs.iter().collect::<String>())
+                .chain(ss.iter().map(|y| y.to_string()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        self.defins.push(Smarg { keys, kind: SmargKind::Required });
+
+        self
     }
 
     /// TODO
@@ -195,20 +229,157 @@ impl Smargs {
         description: &str,
         default: &str,
     ) -> Self {
-        todo!()
+        let keys = if let Some((cs, ss)) = keys {
+            iter::once(cs.iter().collect::<String>())
+                .chain(ss.iter().map(|y| y.to_string()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        self.defins.push(Smarg { keys, kind: SmargKind::Optional(default.to_owned()) });
+
+        self
     }
 
-    /// Parse the argument strings into the type `T` according to `self`.
+    /// Parse the argument strings into the type `T` according to the
+    /// definition of `self`.
     pub fn parse<T>(
-        self,
+        mut self,
         args: impl Iterator<Item=String>,
-    ) -> Result<T, Error> {
-        todo!()
+    ) -> Result<T, Error>
+    where
+        T: TryFrom<Smargs, Error=Error>,
+    {
+        let am = ArgMap::new(args)?;
+
+        for (i, Smarg { keys, kind }) in self.defins.iter().enumerate() {
+            // Try to find a matching value from args.
+            self.values.0.push(
+                if let Some(value) = am.get(keys).or(am.list.get(i + 1)) {
+                    value.clone()
+                } else {
+                    match kind {
+                        SmargKind::Required => return Err(
+                            Error::Required(i, keys.clone())
+                        ),
+                        SmargKind::Optional(default) => default.clone(),
+                    }
+                }
+            );
+        }
+
+        T::try_from(self)
     }
 
     /// Creates `T` based on a call to `std::env::args`.
-    pub fn from_env<T>(self) -> Result<T, Error> {
+    pub fn from_env<T>(self) -> Result<T, Error>
+    where
+        T: TryFrom<Smargs, Error=Error>,
+    {
         self.parse(std::env::args())
+    }
+
+    fn parse_nth<T>(&self, index: usize) -> Result<T, Error>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: error::Error,
+    {
+        self.values.0
+            .get(index)
+            .ok_or(Error::Position(index))?
+            .parse()
+            .or_else(|first_err: <T as FromStr>::Err|
+                // Assume that T is bool because the earlier argument mapping
+                // was and is unable to differentiate between key-value and
+                // flag -options.
+                true.to_string()
+                    .parse()
+                    // Guessing the type was wrong so return the initial error.
+                    .map_err(|_| Error::Parsing(first_err.to_string()))
+            )
+    }
+}
+
+impl<T1, T2> TryFrom<Smargs> for (T1, T2)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+        ))
+    }
+}
+
+impl<T1, T2, T3> TryFrom<Smargs> for (T1, T2, T3)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+        ))
+    }
+}
+
+impl<T1, T2, T3, T4> TryFrom<Smargs> for (T1, T2, T3, T4)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+    T4: FromStr,
+    <T4 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+            smargs.parse_nth(3)?,
+        ))
+    }
+}
+
+impl<T1, T2, T3, T4, T5> TryFrom<Smargs> for (T1, T2, T3, T4, T5)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+    T4: FromStr,
+    <T4 as FromStr>::Err: error::Error,
+    T5: FromStr,
+    <T5 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+            smargs.parse_nth(3)?,
+            smargs.parse_nth(4)?,
+        ))
     }
 }
 
@@ -219,12 +390,13 @@ mod tests {
     #[test]
     fn argmap_use_case() {
         let am = ArgMap::new(
-            "scale_img.exe ./img.png -v -w 1366 -h 768 --output scaled.png"
+            "scale_img.exe ./img.png -v -w 1366 -h -768 --output scaled.png"
                 .split(' ')
                 .map(String::from)
             )
             .unwrap();
 
+        assert_eq!(am.dict.len(), 4);
         assert_eq!(am.dict["v"], 3);
         assert_eq!(am.dict["w"], 4);
         assert_eq!(am.dict["h"], 6);
