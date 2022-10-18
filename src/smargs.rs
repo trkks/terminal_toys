@@ -129,10 +129,18 @@ pub struct Smarg {
 pub enum SmargKind {
     Required,
     Optional(String),
+    Flag,
 }
 
 #[derive(Debug)]
 pub struct StringVec(Vec<String>);
+
+/// Specifies if an argument is a flag.
+/// TODO Would just plain ol' Optional be adequate?
+pub enum ArgType<'a> {
+    False,
+    Other(&'a str),
+}
 
 /// SiMpler thAn wRiting it once aGain Surely :)
 ///
@@ -145,7 +153,7 @@ pub struct StringVec(Vec<String>);
 ///     terminal_toys::Smargs::builder("Tupletize!")
 ///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
 ///         .required(None, "The string to repeat")
-///         .optional(Some((&['v'], &[])), "Print information about the result", "false")
+///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
 ///         .parse(
 ///             vec!["tupletize.exe", "-v", "--amount", "3", "foo bar"]
 ///                 .into_iter().map(String::from)
@@ -167,7 +175,7 @@ pub struct StringVec(Vec<String>);
 ///     terminal_toys::Smargs::builder("Tupletize!")
 ///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
 ///         .required(None, "The string to repeat")
-///         .optional(Some((&['v'], &[])), "Print information about the result", "true")
+///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
 ///         .parse(
 ///             vec!["tupletize.exe", "3", "foo bar"].into_iter().map(String::from)
 ///         )
@@ -203,15 +211,21 @@ impl Smargs {
 
     /// Define next an argument with a default value that will be used if
     /// nothing is provided by the user.
+    ///
+    /// A boolean argument defaults to FALSE because using a flag essentially
+    /// means signaling the event of or __turning on__ something, certainly not
+    /// the contrary.
     pub fn optional(
         mut self,
         keys: Option<(&[char], &[&str])>,
         description: &str,
-        default: &str,
+        default: ArgType,
     ) -> Self {
-        self.push_arg(
-            keys, description, SmargKind::Optional(default.to_owned())
-        );
+        let kind = match default {
+            ArgType::False    => SmargKind::Flag,
+            ArgType::Other(s) => SmargKind::Optional(s.to_owned()),
+        };
+        self.push_arg(keys, description, kind);
         self
     }
 
@@ -235,13 +249,20 @@ impl Smargs {
             // Try to find a matching value from args.
             self.values.0.push(
                 if let Some(value) = am.get(keys).or(am.list.get(i + 1)) {
-                    value.clone()
+                    if let SmargKind::Flag = kind {
+                        // Something found for the key -> flag is signaled.
+                        // TODO Will this make problems when flag is last arg?
+                        true.to_string()
+                    } else {
+                        value.clone()
+                    }
                 } else {
                     match kind {
                         SmargKind::Required => return Err(
                             Error::Required(i, keys.clone())
                         ),
                         SmargKind::Optional(default) => default.clone(),
+                        SmargKind::Flag => false.to_string(),
                     }
                 }
             );
@@ -382,7 +403,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Smargs, ArgMap, Error};
+    use super::{Smargs, ArgMap, Error, ArgType};
 
     #[test]
     fn argmap_use_case() {
@@ -413,9 +434,9 @@ mod tests {
             .optional(
                 Some((&['v'], &["verbose"])),
                 "Print realtime status of operations",
-                &true.to_string()
+                ArgType::False,
             )
-            .optional(Some((&['o'], &["output"])), "Output path", "a")
+            .optional(Some((&['o'], &["output"])), "Output path", ArgType::Other("a"))
             .parse(
                 "scale_img.exe -v ./img.png -w 1366 -h 768 --output scaled.png"
                 .split(' ').map(String::from)
@@ -430,12 +451,30 @@ mod tests {
     }
 
     #[test]
+    /// NOTE: This is testing the __implementation__ (on d76cf9288) that does
+    /// multiple attempts on parsing to the required type from string following
+    /// the option.
+    fn confused_flag_option() {
+        let (a1, a2) : (bool, String) =
+            Smargs::builder("Compute P AND NOT Q from a bool and a string")
+            .optional(Some((&['b'], &["bool"])), "A bool", ArgType::False)
+            .required(None, "A string representing another bool")
+            .parse("a -b false".split(' ').map(String::from))
+            .unwrap();
+
+        // True AND NOT False
+        let computation = a1 && !a2.parse::<bool>().unwrap();
+
+        assert!(computation);
+    }
+
+    #[test]
     fn error_on_duplicates() {
         // Catch the __first__ duplicate that appears from left to right.
 
         let err_duplicate = Smargs::builder("Test program")
-            .optional(Some((&['f'], &[])), "Foo", &false.to_string())
-            .optional(Some((&['b'], &[])), "Bar", &true.to_string())
+            .optional(Some((&['f'], &[])), "Foo", ArgType::False)
+            .optional(Some((&['b'], &[])), "Bar", ArgType::False)
             .parse::<(bool, bool)>("a -fbfb".split(' ').map(String::from))
             .unwrap_err();
         assert_eq!(
@@ -444,8 +483,8 @@ mod tests {
         );
 
         let err_duplicate = Smargs::builder("Test program")
-            .optional(Some((&[], &["foo"])), "Foo", &false.to_string())
-            .optional(Some((&[], &["bar"])), "Bar", &true.to_string())
+            .optional(Some((&[], &["foo"])), "Foo", ArgType::False)
+            .optional(Some((&[], &["bar"])), "Bar", ArgType::False)
             .parse::<(bool, bool)>(
                 "a --foo --foo --bar --bar".split(' ').map(String::from)
             )
@@ -456,9 +495,9 @@ mod tests {
         );
 
         let err_duplicate = Smargs::builder("Test program")
-            .optional(Some((&['f'], &[])), "Foo", &false.to_string())
-            .optional(Some((&['b'], &[])), "Bar", &true.to_string())
-            .optional(Some((&[], &["baz"])), "Baz", &true.to_string())
+            .optional(Some((&['f'], &[])), "Foo", ArgType::False)
+            .optional(Some((&['b'], &[])), "Bar", ArgType::False)
+            .optional(Some((&[], &["baz"])), "Baz", ArgType::False)
             .parse::<(bool, bool, bool)>(
                 "a -fb --baz -bf --baz".split(' ').map(String::from)
             )
@@ -474,10 +513,10 @@ mod tests {
         let (b, a, r, bar) :
             (bool, bool, String, bool) =
             Smargs::builder("Test program")
-            .optional(Some((&['b'], &[])), "Bee", &false.to_string())
-            .optional(Some((&['a'], &[])), "Ay", &false.to_string())
-            .optional(Some((&['r'], &[])), "Are", "some-default")
-            .optional(Some((&[], &["bar"])), "Bar", &false.to_string())
+            .optional(Some((&['b'], &[])), "Bee", ArgType::False)
+            .optional(Some((&['a'], &[])), "Ay", ArgType::False)
+            .optional(Some((&['r'], &[])), "Are", ArgType::Other("some-default"))
+            .optional(Some((&[], &["bar"])), "Bar", ArgType::False)
             .parse("a -bar r-arg-value --bar".split(' ').map(String::from))
             .unwrap();
         assert!(b);
@@ -488,11 +527,11 @@ mod tests {
         let (b, a, r, verbose, f) :
             (bool, bool, bool, bool, f32) =
             Smargs::builder("Test program")
-            .optional(Some((&['b'], &[])), "Bee", &false.to_string())
-            .optional(Some((&['a'], &[])), "Ay", &false.to_string())
-            .optional(Some((&['r'], &[])), "Are", &false.to_string())
-            .optional(Some((&[], &["verbose"])), "Verbose", &false.to_string())
-            .optional(Some((&['f'], &[])), "Foo", "666")
+            .optional(Some((&['b'], &[])), "Bee", ArgType::False)
+            .optional(Some((&['a'], &[])), "Ay", ArgType::False)
+            .optional(Some((&['r'], &[])), "Are", ArgType::False)
+            .optional(Some((&[], &["verbose"])), "Verbose", ArgType::False)
+            .optional(Some((&['f'], &[])), "Foo", ArgType::Other("666"))
             .parse("a -bar --verbose -f 4.2".split(' ').map(String::from))
             .unwrap();
         assert!(a);
@@ -506,8 +545,8 @@ mod tests {
     #[test]
     fn error_on_empty() {
         let err_empty = Smargs::builder("Test program")
-            .optional(Some((&['f'], &[])), "Foo", &false.to_string())
-            .optional(Some((&['b'], &[])), "Bar", &true.to_string())
+            .optional(Some((&['f'], &[])), "Foo", ArgType::False)
+            .optional(Some((&['b'], &[])), "Bar", ArgType::False)
             .parse::<(bool, bool)>(std::iter::empty())
             .unwrap_err();
         assert_eq!(err_empty, Error::Empty);
