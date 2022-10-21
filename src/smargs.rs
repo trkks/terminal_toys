@@ -43,18 +43,19 @@ impl error::Error for Error {}
 /// example "--my-username--" will be presented as being keys. However for
 /// example "-42" is strictly considered a value.
 struct ArgMap {
-    list: Vec<String>,
+    list: Vec<Option<String>>,
     dict: HashMap<String, usize>,
 }
 
 impl ArgMap {
     /// Collect the strings in `args` into a list and map ones that __might__
-    /// be keys to their corresponding value's index in said list.
+    /// be keys to __their__ corresponding index in said list.
     fn new(
         args: impl Iterator<Item = String>,
     ) -> Result<ArgMap, Error> {
         // Contains the original arguments as is.
-        let list: Vec<String> = args.collect();
+        // Ignore the executable. The 0-index is special (EDIT Is it really anymore?).
+        let list: Vec<String> = args.skip(1).collect();
         if list.is_empty() { return Err(Error::Empty) }
 
         // Get all the (possible) key-value pairs of the argument list.
@@ -64,13 +65,10 @@ impl ArgMap {
         for (key, value) in list.iter()
             // Enumerate to save a handle to original list index.
             .enumerate()
-            // Skip the executable. The 0-index is special.
-            .skip(1)
-            // Remove now unneeded values from inbetween and calculate the
-            // correct index handle (out of bounds wraps to 0).
+            // Remove now unneeded values from inbetween.
             .filter_map(|(i, s)| match Self::key_prefix_len(s) {
                 0 => None,
-                n => Some(((i + 1) % list.len(), s, n)),
+                n => Some((i, s, n)),
             })
             // Remove the cli-syntax off of keys and handle the possibility of
             // multi-character groups.
@@ -94,7 +92,8 @@ impl ArgMap {
             }
         }
 
-        Ok(ArgMap { list, dict })
+        // TODO Normalize the char-groups into self.list
+        Ok(ArgMap { list: list.into_iter().map(Some).collect(), dict })
     }
 
     fn key_prefix_len(s: &str) -> usize {
@@ -107,15 +106,16 @@ impl ArgMap {
         0
     }
 
-    /// Return the first matching "token" based on some keys.
-    fn get(&self, keys: &[String]) -> Option<&String> {
-        keys.iter()
-            .find_map(|key|
-                self.dict
-                    .get(key)
-                    .map(|&i| self.list.get(i))
-                    .flatten()
-            )
+    /// Find, return and replace with `None` the __first__ matching "token"
+    /// based on some keys.
+    fn pop(&mut self, keys: &[String]) -> Option<(usize, String)> {
+        match keys.iter().find_map(|key| self.dict.get(key)) {
+            Some(&i) if i < self.list.len() => {
+                let token = self.list[i].take().unwrap();
+                Some((i, token))
+            },
+            _ => None,
+        }
     }
 }
 
@@ -129,11 +129,10 @@ pub struct Smarg {
 pub enum SmargKind {
     Required,
     Optional(String),
+    // TODO Just combine this into the ArgType::False and make own method for
+    // flag-arguments.
     Flag,
 }
-
-#[derive(Debug)]
-pub struct StringVec(Vec<String>);
 
 /// Specifies if an argument is a flag.
 /// TODO Would just plain ol' Optional be adequate?
@@ -149,8 +148,9 @@ pub enum ArgType<'a> {
 /// order to create the string `(foo bar, foo bar, foo bar)`.
 /// ```
 /// # fn main() -> Result<(), String> {
+/// use terminal_toys::{Smargs, ArgType};
 /// let (n, s, verbose) : (usize, String, bool) =
-///     terminal_toys::Smargs::builder("Tupletize!")
+///     Smargs::builder("Tupletize!")
 ///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
 ///         .required(None, "The string to repeat")
 ///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
@@ -171,8 +171,9 @@ pub enum ArgType<'a> {
 /// ```
 /// Or with just ordered arguments and the verbose flag defaulted to `true`:
 /// ```
+/// use terminal_toys::{Smargs, ArgType};
 /// let (n, s, verbose) : (usize, String, bool) =
-///     terminal_toys::Smargs::builder("Tupletize!")
+///     Smargs::builder("Tupletize!")
 ///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
 ///         .required(None, "The string to repeat")
 ///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
@@ -187,7 +188,7 @@ pub enum ArgType<'a> {
 #[derive(Debug)]
 pub struct Smargs {
     defins: Vec<Smarg>,
-    values: StringVec,
+    values: Vec<Option<String>>,
 }
 
 impl Smargs {
@@ -196,7 +197,7 @@ impl Smargs {
     ///
     /// `description` is the general description of the program.
     pub fn builder(description: &str) -> Self {
-        Self { defins: Vec::new(), values: StringVec(Vec::new()) }
+        Self { defins: Vec::new(), values: Vec::new() }
     }
 
     /// Define next an argument which __needs__ to be provided by the user.
@@ -237,38 +238,75 @@ impl Smargs {
     ) -> Result<T, Error>
     where
         T: TryFrom<Smargs, Error=Error>,
-    {
-        let am = ArgMap::new(args)?;
+   {
+        let mut am = ArgMap::new(args)?;
+
+        // Split the arguments into 1) kv-pairs and flags or 2) "operands".
 
         // Populate the list of values by trying to find a matching value
         // from args or based on "strategy" of the SmargKind.
 
         // Fill correct indices based on keys first and position second.
         // FIXME Does not work when key and positional arguments are mixed.
-        for (i, Smarg { keys, kind }) in self.defins.iter().enumerate() {
-            // Try to find a matching value from args.
-            self.values.0.push(
-                if let Some(value) = am.get(keys).or(am.list.get(i + 1)) {
-                    if let SmargKind::Flag = kind {
-                        // Something found for the key -> flag is signaled.
-                        // TODO Will this make problems when flag is last arg?
-                        true.to_string()
-                    } else {
-                        value.clone()
-                    }
-                } else {
-                    match kind {
-                        SmargKind::Required => return Err(
-                            Error::Required(i, keys.clone())
-                        ),
-                        SmargKind::Optional(default) => default.clone(),
-                        SmargKind::Flag => false.to_string(),
-                    }
-                }
-            );
+        self.resolve_kv_pairs(&mut am);
+        println!("{:?}", self.values);
+        println!("{:?}", am.list);
+        self.parse_positionals_left(am)?;
+        // TODO Instead of parsing into the values here, maybe return some
+        // abstraction like "IntermediateElemT_i" or "FakeT_i" (or perhaps
+        // `std::any::Any`?) that could be used to identify the boolean at
+        // runtime(?) (and thus get rid of ArgType::False).
+        T::try_from(self)
+    }
+
+    fn parse_positionals_left(&mut self, mut am: ArgMap) -> Result<(), Error> {
+        let unresolved_defs =
+            self.values.iter_mut()
+                // Enumerate for the Required-error -.-
+                .enumerate()
+                .zip(self.defins.iter())
+                // TODO Use Options here because
+                // stringorientedprogrammingconsideredbad...
+                .filter(|((_, s), _)| s.is_none());
+
+        // Zip with the left args after kv-pairs and flags are filtered out.
+        // TODO Holy heck that's some tuples.
+        for (((i, value), Smarg { keys, kind }), val_opt)
+            in unresolved_defs.zip(am.list.iter_mut().filter(|x| x.is_some()))
+        {
+            //if let SmargKind::Required = kind {
+            //    return Err(Error::Required(i, keys.clone()));
+            //}
+            value.replace(val_opt.take().unwrap());
         }
 
-        T::try_from(self)
+        Ok(())
+    }
+
+    fn resolve_kv_pairs(&mut self, am: &mut ArgMap) {
+        self.values = self.defins.iter()
+            .map(|Smarg { keys, kind }|
+                // TODO Somehow despookify this if?
+                // TODO This sort of indexing makes it feel like ArgMap is
+                // useless: how much better can the dict be compared to
+                // linearly searching for the key-string?
+                if let Some((key_idx, _)) = am.pop(keys) {
+                    if let SmargKind::Flag = kind {
+                        Some(true.to_string())
+                    } else {
+                        // Take the following value.
+                        Some(am.list[key_idx + 1].take().unwrap())
+                    }
+                } else {
+                    // Flags default to false here if a match is not found.
+                    if let SmargKind::Flag = kind {
+                        Some(false.to_string())
+                    } else {
+                        None
+                    }
+                }
+            )
+            .collect();
     }
 
     /// Creates `T` based on a call to `std::env::args`.
@@ -298,23 +336,20 @@ impl Smargs {
         self.defins.push(Smarg { keys, kind });
     }
 
-    fn parse_nth<T>(&self, index: usize) -> Result<T, Error>
+    fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
     where
         T: FromStr,
         <T as FromStr>::Err: error::Error,
     {
-        self.values.0
-            .get(index)
+        self.values.get_mut(index)
+            .expect(&format!("Smargs.values constructed incorrectly: None in index {}", index))
+            .take()
             .ok_or(Error::Position(index))?
             .parse()
-            .or_else(|first_err: <T as FromStr>::Err|
-                // Assume that T is bool because the earlier argument mapping
-                // was and is unable to differentiate between key-value and
-                // flag -options.
-                true.to_string()
-                    .parse()
-                    // Guessing the type was wrong so return the initial error.
-                    .map_err(|_| Error::Parsing(format!("#{} {}", index, first_err.to_string())))
+            .map_err(
+                |e: <T as FromStr>::Err| Error::Parsing(
+                    format!("#{} {}", index, e.to_string())
+                )
             )
     }
 }
@@ -327,7 +362,7 @@ where
     <T2 as FromStr>::Err: error::Error,
 {
     type Error = Error;
-    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -345,7 +380,7 @@ where
     <T3 as FromStr>::Err: error::Error,
 {
     type Error = Error;
-    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -366,7 +401,7 @@ where
     <T4 as FromStr>::Err: error::Error,
 {
     type Error = Error;
-    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -390,7 +425,7 @@ where
     <T5 as FromStr>::Err: error::Error,
 {
     type Error = Error;
-    fn try_from(smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -415,10 +450,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(am.dict.len(), 4);
-        assert_eq!(am.dict["v"], 3);
-        assert_eq!(am.dict["w"], 4);
-        assert_eq!(am.dict["h"], 6);
-        assert_eq!(am.dict["output"], 8);
+        assert_eq!(am.dict["v"], 1);
+        assert_eq!(am.dict["w"], 2);
+        assert_eq!(am.dict["h"], 4);
+        assert_eq!(am.dict["output"], 6);
     }
 
     #[test]
@@ -457,10 +492,10 @@ mod tests {
     fn confused_flag_option() {
         let (a1, a2) : (bool, String) =
             Smargs::builder("Compute P AND NOT Q from a bool and a string")
-            .optional(Some((&['b'], &["bool"])), "A bool", ArgType::False)
-            .required(None, "A string representing another bool")
-            .parse("a -b false".split(' ').map(String::from))
-            .unwrap();
+                .optional(Some((&['b'], &["bool"])), "A bool", ArgType::False)
+                .required(None, "A string representing another bool")
+                .parse("a -b false".split(' ').map(String::from))
+                .unwrap();
 
         // True AND NOT False
         let computation = a1 && !a2.parse::<bool>().unwrap();
