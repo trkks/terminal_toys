@@ -53,47 +53,55 @@ impl ArgMap {
     fn new(
         args: impl Iterator<Item = String>,
     ) -> Result<ArgMap, Error> {
-        // Contains the original arguments as is.
-        // Ignore the executable. The 0-index is special (EDIT Is it really anymore?).
-        let list: Vec<String> = args.skip(1).collect();
-        if list.is_empty() { return Err(Error::Empty) }
-
-        // Get all the (possible) key-value pairs of the argument list.
-        // TODO This could be snappier as an `iterator.collect()`, but couldn't
-        // figure it out.
-        let mut dict = HashMap::with_capacity(list.len());
-        for (key, value) in list.iter()
-            // Enumerate to save a handle to original list index.
-            .enumerate()
+        // "Normalized" representation of the original arguments.
+        // The bool represents if the argument is an option, which needs to be
+        // added to the dict.
+        let list: Vec<(bool, String)> = args
+            // Ignore the executable.
+            .skip(1)
             // Remove now unneeded values from inbetween.
-            .filter_map(|(i, s)| match Self::key_prefix_len(s) {
-                0 => None,
-                n => Some((i, s, n)),
+            .map(|s| match Self::key_prefix_len(&s) {
+                0 => (s, 0),
+                n => (s, n),
             })
-            // Remove the cli-syntax off of keys and handle the possibility of
+            // Remove the cli-syntax off of keys and normalize the
             // multi-character groups.
-            .fold(Vec::with_capacity(list.len()), |mut acc, (i, s, n)| {
+            .fold(Vec::new(), |mut acc, (s, n)| {
                 if n == 1 {
                     // Handle the possibility of multi-character group.
                     acc.extend(
                         s.chars()
                             .skip(1)
-                            .map(|c| (c.to_string(), i))
+                            .map(|c| (true, c.to_string()))
                     );
                 } else {
-                    acc.push((s.chars().skip(n).collect(), i));
+                    acc.push((n > 0, s.chars().skip(n).collect()));
                 }
                 acc
-            })
+            });
+
+        if list.is_empty() { return Err(Error::Empty) }
+
+        // TODO This could be snappier as a `Result.collect()`, but couldn't
+        // figure it out.
+        // Save handles to the list's indices for all options.
+        let mut dict = HashMap::with_capacity(list.len());
+        for (key, value)
+            in list.iter()
+                .enumerate()
+                .filter_map(|(i, (is_option, s))| is_option.then_some((s, i)))
         {
             // Insert into dict and Err if key was already found.
             if let Some(_) = dict.insert(key.clone(), value) {
-                return Err(Error::Duplicate(key))
+                // TODO Earlier, a clone wasn't needed here...
+                return Err(Error::Duplicate(key.clone()))
             }
         }
 
-        // TODO Normalize the char-groups into self.list
-        Ok(ArgMap { list: list.into_iter().map(Some).collect(), dict })
+        Ok(ArgMap {
+            list: list.into_iter().map(|(_, s)| Some(s)).collect(),
+            dict
+        })
     }
 
     fn key_prefix_len(s: &str) -> usize {
@@ -183,7 +191,7 @@ pub enum ArgType<'a> {
 ///         .unwrap();
 /// assert_eq!(n, 3);
 /// assert_eq!(s, "foo bar");
-/// assert!(verbose);
+/// assert!(!verbose);
 /// ```
 #[derive(Debug)]
 pub struct Smargs {
