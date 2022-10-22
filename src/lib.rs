@@ -5,7 +5,7 @@ pub mod smargs;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-pub use smargs::Smargs;
+pub use smargs::{Smargs, ArgType};
 
 
 #[derive(Debug)]

@@ -2,637 +2,566 @@ use std::collections::HashMap;
 use std::error;
 use std::fmt;
 use std::iter;
-use std::ops;
-use std::str;
+use std::str::FromStr;
+use std::convert::TryFrom;
 
 
-/// Error type for `Smargs`'s constructors.
-///
-/// `SmargsInitError::Duplicate` can be used to tell the caller which argument
-/// was a duplicate and its token-type.
-#[derive(Debug, PartialEq)]
-pub enum SmargsInitError {
+/// Error type for getting and parsing the values of arguments.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error {
     Empty,
-    Duplicate(Token),
+    Duplicate(String),
+    Parsing(String),
+    Position(usize),
+    Required(usize, Vec<String>),
 }
-
 
 /// Offer nicer error-messages to user.
 /// Implementing `Display` is also needed for `std::error::Error`.
-impl fmt::Display for SmargsInitError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
             Self::Empty => String::from("No arguments found"),
             // TODO impl Display for Token
-            Self::Duplicate(t) => format!("Duplicate entry of {:?}", t),
+            Self::Duplicate(s) => format!("Duplicate entry of '{}'", s),
+            Self::Parsing(s) => format!("Failed to parse: {}", s),
+            Self::Position(i) => format!("Argument index {} out of bounds for required type", i),
+            Self::Required(i, keys) => format!("This argument is required: position {}, keys {:?}", i, keys),
         };
         write!(f, "{}", msg)
     }
 }
 
+impl error::Error for Error {}
 
-impl error::Error for SmargsInitError {}
-
-type SmargResult<T> = Result<T, SmargError<T>>;
-
-/// Error type for getting and parsing the values of arguments.
-#[derive(Debug)]
-pub enum SmargError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug
-{
-    Key { flags: Vec<char>, words: Vec<String> },
-    Position(usize),
-    Parsing(<T as str::FromStr>::Err),
-}
-impl<T> SmargError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
-{
-    /// Return if failed to get argument because it was not found.
-    ///
-    /// Example:
-    /// ```
-    /// use terminal_toys::smargs::{Smargs, SmargError as Se};
-    /// let smargs = Smargs::new(
-    ///         "foo.exe -bar --baz".split(' ').map(String::from)
-    ///     ).unwrap();
-    ///
-    /// let (pos, key) = (smargs.nth::<u32>(2), smargs.gets::<u32>(&["qux"]));
-    ///
-    /// assert!(pos.is_err() && key.is_err());
-    /// assert!(pos.unwrap_err().is_not_found());
-    /// assert!(key.unwrap_err().is_not_found());
-    /// ```
-    pub fn is_not_found(&self) -> bool {
-        match self {
-            Self::Parsing(_) => false,
-            _ => true,
-        }
-    }
-
-    /// Create the Key-variant based on the argument keys passed in.
-    /// `SmargError` uses this function in creating a better error message.
-    ///
-    /// Example:
-    /// ```
-    /// use terminal_toys::smargs::{Smargs, SmargError as Se};
-    /// let smargs = Smargs::new(
-    ///         "foo.exe -bar --baz".split(' ').map(String::from)
-    ///     ).unwrap();
-    /// let notfound_err_msg = smargs.gets::<i32>(&["output", "out", "o"])
-    ///     .unwrap_err()
-    ///     .to_string();
-    /// assert!(notfound_err_msg.contains("output"));
-    /// assert!(notfound_err_msg.contains("out"));
-    /// assert!(notfound_err_msg.contains("o"));
-    /// // TODO Position of the argument (in the order of the gets-query?).
-    /// ```
-    fn not_found(keys: &[&str]) -> Self {
-        let mut words = Vec::new();
-        let mut flags = Vec::new();
-        // TODO Could allocations be reduced by passing keys intelligentler?
-        for key in keys {
-            if key.len() == 1 {
-                flags.push(key.chars().next().unwrap());
-            } else if key.len() > 1 {
-                words.push(String::from(*key));
-            }
-        }
-        Self::Key { words, flags }
-    }
-}
-
-
-
-/// Offer nicer error-messages to user.
-/// Implementing `Display` is also needed for `std::error::Error`.
-impl<T> fmt::Display for SmargError<T>
-where
-    T: str::FromStr,
-    <T as str::FromStr>::Err: fmt::Debug,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        let msg = match self {
-            Self::Key { flags, words } => format!(
-                    "option not found {}{}",
-                    flags.iter()
-                        .map(|c| format!(" -{}", c))
-                        .collect::<String>(),
-                    words.iter()
-                        .map(|s| format!(" --{}", s))
-                        .collect::<String>(),
-                ),
-            Self::Position(i) => format!("position not in bounds: {}", i),
-            Self::Parsing(err) => format!("bad format: {:?}", err),
-        };
-        write!(f, "{}", msg)
-    }
-}
-
-
-impl<T> error::Error for SmargError<T>
-where
-    T: str::FromStr + fmt::Debug,
-    <T as str::FromStr>::Err: fmt::Debug,
-{}
-
-
-/// Makes handling the args -strings a bit clearer
-#[derive(Debug, PartialEq, Clone)]
-pub enum Token {
-    Value(String),
-    Flag(char),
-    Word(String),
-}
-
-
-// TODO Parse options from some parameters eg. [Bool("-v", "--verbose", "Print
-// detailed information"), OsPath("-p", "--path", "Path to source file"), ...]
-// smargs = Smargs::new(options_list, env::args())
-/// SiMpler thAn wRiting it once aGain Surely :)
-/// PlaceS strings received froM std::env::ARGS into Suitable structures for
-/// straightforward operation of flags, ordered and naMed ARGumentS.
-///
-/// # Example:
-/// ```
-/// use terminal_toys::smargs::{Smargs, SmargError as Se};
-/// use std::error;
-///
-/// fn get_args(
-///     smargs: &Smargs,
-/// ) -> Result<(String, usize), Box<dyn error::Error>> {
-///     Ok((smargs.last()?, smargs.gets(&["amount", "a"])?))
-/// }
-///
-/// let smargs = terminal_toys::Smargs::new(
-///     "tupletize.exe -v --amount 3 foo".split(' ').map(String::from)
-/// ).unwrap();
-///
-/// let (target, n) = match get_args(&smargs) {
-///     Err(e) => panic!("Argument failure: {}", e),
-///     Ok(x)  => x,
-/// };
-///
-/// let mut result = String::from("()");
-/// if n > 0 {
-///     result = format!("({})", vec![target.clone(); n].join(", "));
-///
-///     if smargs.has("v") {
-///         // Prints: "tupletize.exe: Result is 15 characters"
-///         println!(
-///             "{}: Result is {} characters",
-///             smargs.exe(), result.len()
-///         );
-///     }
-/// }
-///
-/// assert_eq!(result, "(foo, foo, foo)");
-/// ```
-/// Or with just ordered arguments:
-/// ```
-/// let smargs = terminal_toys::Smargs::new(
-///     "tupletize.exe 3 foo -v".split(' ').map(String::from)
-/// ).unwrap();
-/// match &smargs[..2] {
-///     []  => { /* Print instructions */ },
-///     [n] => { /* ... */},
-///     [n, target, ..] => {
-///         assert_eq!(n, "3");
-///         assert_eq!(target, "foo");
-///         // ...
-///     },
-/// }
-/// ```
-#[derive(Debug, PartialEq, Eq)]
-pub struct Smargs {
-    exe: String,
-    list: Vec<String>,
+/// A mapping from keys to indices to strings:
+/// > ArgMap[Key] == Index -> ArgMap[Index] == String
+/// Key-value pairs are roughly based on the rough syntax:
+/// > Key := -Alph Value | --Alph Value
+/// Value is a superset of Alph, which means is not always clear when a string
+/// is a key or a value. This means, that some strings meant as values for
+/// example "--my-username--" will be presented as being keys. However for
+/// example "-42" is strictly considered a value.
+struct ArgMap {
+    list: Vec<Option<String>>,
     dict: HashMap<String, usize>,
 }
-impl Smargs {
-    pub fn new(
-        mut args: impl Iterator<Item = String>,
-    ) -> Result<Self, SmargsInitError> {
-        let exe = args.next().ok_or(SmargsInitError::Empty)?;
 
-        // Contains the original arguments without empty ones
-        // TODO parse into typed enums
-        let list: Vec<String> =
-            args.filter_map(|x| {
-                    let xx = String::from(x.trim());
-                    if xx.is_empty() { None } else { Some(xx) }
-                })
-                // Hide a "boolean" to last index
-                .chain(iter::once(true.to_string()))
-                .collect();
-
-        // Tokenize and enumerate with original indices (ie. flag groups like
-        // "-bar" count as one index)
-        // NOTE that the added boolean in last index is also tokenized so that
-        // the next dict-loop wraps up nicely
-        let mut tokens = Vec::with_capacity(list.len());
-        for (i, s) in list.iter().enumerate() {
-            if s.starts_with("--") {
-                tokens.push(
-                    (i, Token::Word(s.chars().skip(2).collect()))
-                );
-            } else if s.starts_with("-") {
-                // Possible flag group
-                tokens.extend(
-                    s.chars()
-                        .skip(1)
-                        .map(|c| (i, Token::Flag(c)))
-                );
-            } else {
-                tokens.push(
-                    (i, Token::Value(String::from(s)))
-                );
-            }
-        }
-
-        let mut dict = HashMap::with_capacity(tokens.len());
-        // Emulate old school for-loop because Rust is so expressive /s
-        let mut i = 0;
-        while i < tokens.len().saturating_sub(1) {
-            let current_token = &tokens[i].1;
-            let (k, next_token) = &tokens[i + 1];
-
-            // Check if left side of pair is a key
-            let kv_opt = match current_token {
-                Token::Flag(chr) => Some(chr.to_string()),
-                Token::Word(s)   => Some(s.clone()),
-                _ => None,
-            }
-            // If it was, it will map to a value in resulting dict
-            .zip(Some(
-                if let Token::Value(_) = next_token {
-                    // Do not check if this Value is a key next iteration
-                    // This is literally the only reason for not using for-loop
-                    i += 1;
-                    // Point at the following Value in the original list
-                    *k
+impl ArgMap {
+    /// Collect the strings in `args` into a list and map ones that __might__
+    /// be keys to __their__ corresponding index in said list.
+    fn new(
+        args: impl Iterator<Item = String>,
+    ) -> Result<ArgMap, Error> {
+        // "Normalized" representation of the original arguments.
+        // The bool represents if the argument is an option, which needs to be
+        // added to the dict.
+        let list: Vec<(bool, String)> = args
+            // Ignore the executable.
+            .skip(1)
+            // Remove the cli-syntax off of keys and normalize the
+            // multi-character groups.
+            .fold(Vec::new(), |mut acc, s| {
+                let n = Self::key_prefix_len(&s);
+                if n == 1 {
+                    // Multi-character group.
+                    acc.extend(
+                        s.chars().skip(1).map(|c| (true, c.to_string()))
+                    );
                 } else {
-                    // Key without following value points to the boolean
-                    list.len() - 1
+                    acc.push((n > 0, s.chars().skip(n).collect()));
                 }
-            ));
+                acc
+            });
 
-            // Insert into dict and Err if key was already found
-            if let Some((key, value)) = kv_opt {
-                if let Some(_value) = dict.insert(key, value) {
-                    return Err(
-                        SmargsInitError::Duplicate(current_token.clone())
-                    )
-                }
-            }
+        if list.is_empty() { return Err(Error::Empty) }
 
-            i += 1;
-        }
-
-        Ok(Smargs { list, dict, exe })
-    }
-
-    /// Creates `Smargs` from a call to `std::env::args`.
-    pub fn from_env() -> Result<Self, SmargsInitError> {
-        Self::new(std::env::args())
-    }
-
-    pub fn exe(&self) -> &String {
-        &self.exe
-    }
-
-    pub fn len(&self) -> usize {
-        // Do not include the "boolean" at the end
-        &self.list.len() - 1
-    }
-
-    /// Parse and return the nth item in list.
-    /// TODO Should the return value be strictly from the _values_ (ie. the
-    /// arguments) or can the options and values be returned "mixed"?
-    pub fn nth<T>(&self, index: usize) -> SmargResult<T>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        // Do not include the "boolean" at the end
-        Self::parse_arg(
-            self.list[..self.list.len() - 1]
-                .get(index)
-                .ok_or(SmargError::Position(index))?
-        )
-    }
-
-    pub fn first<T>(&self) -> SmargResult<T>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        // Do not include the "boolean" at the end
-        Self::parse_arg(
-            self.list[..self.list.len() - 1]
-                .first()
-                .ok_or(SmargError::Position(0))?
-        )
-    }
-
-    pub fn last<T>(&self) -> SmargResult<T>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        // Do not include the "boolean" at the end
-        Self::parse_arg(
-            self.list[..self.list.len() - 1]
-                .last()
-                // NOTE It's dumb to return N - 1, as the list is empty anyway.
-                .ok_or(SmargError::Position(self.list.len() - 1))?
-        )
-    }
-
-    /// Return the matching value based on a list of keys.
-    // TODO Also keep a record of the order of calls to this (see
-    // GetsError::not_found) -> which would need the values to be removed from
-    // the smargs-instance.
-    pub fn gets<T>(&self, keys: &[&str]) -> Result<T, SmargError<T>>
-    where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
-    {
-        for &key in keys {
-            if let Some(s)
-                = self.dict.get(key)
-                    .map(|&i| self.list.get(i))
-                    .flatten()
-            {
-                return Self::parse_arg(s)
+        // TODO This could be snappier as a `Result.collect()`, but couldn't
+        // figure it out.
+        // Save handles to the list's indices for all options.
+        let mut dict = HashMap::with_capacity(list.len());
+        for (key, value)
+            in list.iter()
+                .enumerate()
+                .filter_map(|(i, (is_option, s))| is_option.then_some((s, i)))
+        {
+            // Insert into dict and Err if key was already found.
+            if let Some(_) = dict.insert(key.clone(), value) {
+                // TODO Earlier, a clone wasn't needed here...
+                return Err(Error::Duplicate(key.clone()))
             }
         }
-        return Err(SmargError::not_found(keys))
+
+        Ok(ArgMap {
+            list: list.into_iter().map(|(_, s)| Some(s)).collect(),
+            dict
+        })
     }
 
-    pub fn has(&self, key: &str) -> bool {
-        self.dict.contains_key(key)
+    fn key_prefix_len(s: &str) -> usize {
+        let prefix_len = s.chars().take(2).take_while(|c| *c == '-').count();
+        if let Some(fst_char_of_key) = s.chars().skip(prefix_len).next() {
+            if !fst_char_of_key.is_ascii_digit() {
+                return prefix_len
+            }
+        }
+        0
     }
 
-    fn parse_arg<T>(arg: &str) -> SmargResult<T>
+    /// Find, return and replace with `None` the __first__ matching "token"
+    /// based on some keys.
+    fn pop(&mut self, keys: &[String]) -> Option<(usize, String)> {
+        match keys.iter().find_map(|key| self.dict.get(key)) {
+            Some(&i) if i < self.list.len() => {
+                let token = self.list[i].take().unwrap();
+                Some((i, token))
+            },
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Smarg {
+    keys: Vec<String>,
+    kind: SmargKind,
+}
+
+#[derive(Debug)]
+pub enum SmargKind {
+    Required,
+    Optional(String),
+    // TODO Just combine this into the ArgType::False and make own method for
+    // flag-arguments.
+    Flag,
+}
+
+/// Specifies if an argument is a flag.
+/// TODO Would just plain ol' Optional be adequate?
+pub enum ArgType<'a> {
+    False,
+    Other(&'a str),
+}
+
+/// SiMpler thAn wRiting it once aGain Surely :)
+///
+/// # Examples:
+/// Here the execution of a program is guided by command-line arguments in
+/// order to create the string `(foo bar, foo bar, foo bar)`.
+/// ```
+/// # fn main() -> Result<(), String> {
+/// use terminal_toys::{Smargs, ArgType};
+/// let (n, s, verbose) : (usize, String, bool) =
+///     Smargs::builder("Tupletize!")
+///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
+///         .required(None, "The string to repeat")
+///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
+///         .parse(
+///             vec!["tupletize.exe", "-v", "--amount", "3", "foo bar"]
+///                 .into_iter().map(String::from)
+///         )
+///         .map_err(|e| format!("Argument failure: {}", e))?;
+///
+/// let result = format!("({})", vec![s.clone(); n].join(", "));
+///
+/// if verbose {
+///     println!("Character count: {}", result.len()); // Character count: 27
+/// }
+///
+/// assert_eq!(result, "(foo bar, foo bar, foo bar)".to_owned());
+/// # Ok(()) }
+/// ```
+/// Or with just ordered arguments and the verbose flag defaulted to `true`:
+/// ```
+/// use terminal_toys::{Smargs, ArgType};
+/// let (n, s, verbose) : (usize, String, bool) =
+///     Smargs::builder("Tupletize!")
+///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
+///         .required(None, "The string to repeat")
+///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
+///         .parse(
+///             vec!["tupletize.exe", "3", "foo bar"].into_iter().map(String::from)
+///         )
+///         .unwrap();
+/// assert_eq!(n, 3);
+/// assert_eq!(s, "foo bar");
+/// assert!(!verbose);
+/// ```
+#[derive(Debug)]
+pub struct Smargs {
+    defins: Vec<Smarg>,
+    values: Vec<Option<String>>,
+}
+
+impl Smargs {
+    /// Start a builder defining the order, keys and description of a program
+    /// and its arguments.
+    ///
+    /// `description` is the general description of the program.
+    pub fn builder(description: &str) -> Self {
+        Self { defins: Vec::new(), values: Vec::new() }
+    }
+
+    /// Define next an argument which __needs__ to be provided by the user.
+    pub fn required(
+        mut self,
+        keys: Option<(&[char], &[&str])>,
+        description: &str,
+    ) -> Self {
+        self.push_arg(keys, description, SmargKind::Required);
+        self
+    }
+
+    /// Define next an argument with a default value that will be used if
+    /// nothing is provided by the user.
+    ///
+    /// A boolean argument defaults to FALSE because using a flag essentially
+    /// means signaling the event of or __turning on__ something, certainly not
+    /// the contrary.
+    pub fn optional(
+        mut self,
+        keys: Option<(&[char], &[&str])>,
+        description: &str,
+        default: ArgType,
+    ) -> Self {
+        let kind = match default {
+            ArgType::False    => SmargKind::Flag,
+            ArgType::Other(s) => SmargKind::Optional(s.to_owned()),
+        };
+        self.push_arg(keys, description, kind);
+        self
+    }
+
+    /// Parse the argument strings into the type `T` according to the
+    /// definition of `self` which may include default values for some.
+    pub fn parse<T>(
+        mut self,
+        args: impl Iterator<Item=String>,
+    ) -> Result<T, Error>
     where
-        T: str::FromStr,
-        <T as str::FromStr>::Err: fmt::Debug,
+        T: TryFrom<Smargs, Error=Error>,
+   {
+        let mut am = ArgMap::new(args)?;
+
+        // First, fill correct indices based on keys.
+        self.resolve_kv_pairs(&mut am);
+
+        // Replace all the rest in order after the options are filtered out.
+        for (x, y) in iter::zip(
+            self.values.iter_mut().filter(|x| x.is_none()),
+            am  .list  .iter_mut().filter(|x| x.is_some()),
+        ) {
+            x.replace(y.take().unwrap());
+        }
+
+        // TODO Instead of parsing into the values here, maybe return some
+        // abstraction like "IntermediateElemT_i" or "FakeT_i" (or perhaps
+        // `std::any::Any`?) that could be used to identify the boolean at
+        // runtime(?) (and thus get rid of ArgType::False).
+        T::try_from(self)
+    }
+
+    fn resolve_kv_pairs(&mut self, am: &mut ArgMap) {
+        self.values = self.defins.iter()
+            .map(|Smarg { keys, kind }|
+                // TODO Somehow despookify this if?
+                // TODO This sort of indexing makes it feel like ArgMap is
+                // useless: how much better can the dict be compared to
+                // linearly searching for the key-string?
+                if let Some((key_idx, _)) = am.pop(keys) {
+                    if let SmargKind::Flag = kind {
+                        Some(true.to_string())
+                    } else {
+                        // Take the following value.
+                        Some(am.list[key_idx + 1].take().unwrap())
+                    }
+                } else {
+                    // Flags default to false here if a match is not found.
+                    if let SmargKind::Flag = kind {
+                        Some(false.to_string())
+                    } else {
+                        None
+                    }
+                }
+            )
+            .collect();
+    }
+
+    /// Creates `T` based on a call to `std::env::args`.
+    pub fn from_env<T>(self) -> Result<T, Error>
+    where
+        T: TryFrom<Smargs, Error=Error>,
     {
-        arg.parse::<T>().map_err(|e| SmargError::Parsing(e))
+        self.parse(std::env::args())
+    }
+
+    /// Perform common operations for defining an argument in order
+    /// and TODO: generate a user-friendly description for it.
+    fn push_arg(
+        &mut self,
+        keys: Option<(&[char], &[&str])>,
+        description: &str,
+        kind: SmargKind,
+    ) {
+        let keys = if let Some((cs, ss)) = keys {
+            iter::once(cs.iter().collect::<String>())
+                .chain(ss.iter().map(|y| y.to_string()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        self.defins.push(Smarg { keys, kind });
+    }
+
+    fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: error::Error,
+    {
+        self.values.get_mut(index)
+            .expect(&format!("Smargs.values constructed incorrectly: None in index {}", index))
+            .take()
+            .ok_or(Error::Position(index))?
+            .parse()
+            .map_err(
+                |e: <T as FromStr>::Err| Error::Parsing(
+                    format!("#{} {}", index, e.to_string())
+                )
+            )
     }
 }
 
-impl ops::Index<&str> for Smargs {
-    type Output = String;
-    fn index(&self, key: &str) -> &Self::Output {
-        &self.list[self.dict[key]]
+impl<T1, T2> TryFrom<Smargs> for (T1, T2)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+        ))
     }
 }
 
-/// NOTE Indexes excluding the executable path; use `Smargs::exe` if it's needed
-impl ops::Index<usize> for Smargs {
-    type Output = String;
-    fn index(&self, user_index: usize) -> &Self::Output {
-        // Do not index the "boolean" at the end
-        &self.list[0..self.list.len() - 1][user_index]
+impl<T1, T2, T3> TryFrom<Smargs> for (T1, T2, T3)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+        ))
     }
 }
 
-/// NOTE Indexes excluding the executable path; use `Smargs::exe` if it's needed
-impl ops::Index<ops::Range<usize>> for Smargs {
-    type Output = [String];
-    fn index(&self, user_range: ops::Range<usize>) -> &Self::Output {
-        // Do not index the "boolean" at the end
-        &self.list[0..self.list.len() - 1][user_range]
+impl<T1, T2, T3, T4> TryFrom<Smargs> for (T1, T2, T3, T4)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+    T4: FromStr,
+    <T4 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+            smargs.parse_nth(3)?,
+        ))
     }
 }
 
-impl ops::Index<ops::RangeFull> for Smargs {
-    type Output = [String];
-    fn index(&self, _: ops::RangeFull) -> &Self::Output {
-        &self[0..self.list.len() - 1]
+impl<T1, T2, T3, T4, T5> TryFrom<Smargs> for (T1, T2, T3, T4, T5)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+    T4: FromStr,
+    <T4 as FromStr>::Err: error::Error,
+    T5: FromStr,
+    <T5 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+            smargs.parse_nth(3)?,
+            smargs.parse_nth(4)?,
+        ))
     }
 }
-
-impl ops::Index<ops::RangeFrom<usize>> for Smargs {
-    type Output = [String];
-    fn index(&self, user_range: ops::RangeFrom<usize>) -> &Self::Output {
-        &self[user_range.start..self.list.len() - 1]
-    }
-}
-
-impl ops::Index<ops::RangeTo<usize>> for Smargs {
-    type Output = [String];
-    fn index(&self, user_range: ops::RangeTo<usize>) -> &Self::Output {
-        &self[0..user_range.end]
-    }
-}
-
 
 #[cfg(test)]
 mod tests {
-    use super::{Smargs, SmargsInitError, SmargError, Token};
+    use super::{Smargs, ArgMap, Error, ArgType};
+
     #[test]
-    fn test_smargs_use_case() {
-        let smargs = Smargs::new(
-            "scale_img.exe nn --verbose   -w 300 -h 300  --output scaled.png"
+    fn argmap_use_case() {
+        let am = ArgMap::new(
+            "scale_img.exe ./img.png -v -w 1366 -h -768 --output scaled.png"
+                .split(' ')
+                .map(String::from)
+            )
+            .unwrap();
+
+        assert_eq!(am.dict.len(), 4);
+        assert_eq!(am.dict["v"], 1);
+        assert_eq!(am.dict["w"], 2);
+        assert_eq!(am.dict["h"], 4);
+        assert_eq!(am.dict["output"], 6);
+    }
+
+    #[test]
+    fn general_use_case() {
+        use std::path::PathBuf;
+
+        let (a1, a2, a3, a4, a5) :
+            (PathBuf, u32, u32, bool, PathBuf) =
+            Smargs::builder("A program to scale an image")
+            .required(None, "Path to the image")
+            .required(Some((&['w'], &["width"])), "The width to scale into")
+            .required(Some((&['h'], &["height"])), "The height to scale into")
+            .optional(
+                Some((&['v'], &["verbose"])),
+                "Print realtime status of operations",
+                ArgType::False,
+            )
+            .optional(Some((&['o'], &["output"])), "Output path", ArgType::Other("a"))
+            .parse(
+                "scale_img.exe -v ./img.png -w 1366 -h 768 --output scaled.png"
                 .split(' ').map(String::from)
-        ).unwrap();
+            )
+            .unwrap();
 
-        let indexable_args = vec![
-            "nn", "--verbose", "-w", "300",
-            "-h", "300", "--output", "scaled.png",
-        ];
+        assert_eq!(a1, "./img.png".parse::<PathBuf>().unwrap());
+        assert_eq!(a2, 1366);
+        assert_eq!(a3, 768);
+        assert!(a4);
+        assert_eq!(a5, "scaled.png".parse::<PathBuf>().unwrap());
+    }
 
-        assert_eq!(smargs[0], indexable_args[0]);
-        assert_eq!(smargs[1], indexable_args[1]);
-        assert_eq!(smargs[2], indexable_args[2]);
-        assert_eq!(smargs[3], indexable_args[3]);
-        assert_eq!(smargs[4], indexable_args[4]);
-        assert_eq!(smargs[5], indexable_args[5]);
-        assert_eq!(smargs[6], indexable_args[6]);
-        assert_eq!(smargs[7], indexable_args[7]);
+    #[test]
+    /// NOTE: This is testing the __implementation__ (on d76cf9288) that does
+    /// multiple attempts on parsing to the required type from string following
+    /// the option.
+    fn confused_flag_option() {
+        let (a1, a2) : (bool, String) =
+            Smargs::builder("Compute P AND NOT Q from a bool and a string")
+                .optional(Some((&['b'], &["bool"])), "A bool", ArgType::False)
+                .required(None, "A string representing another bool")
+                .parse("a -b false".split(' ').map(String::from))
+                .unwrap();
 
-        // TODO Is this functionality even useful?
-        // Is supporting the original arg-list necessary?
-        assert_eq!(smargs[..], smargs[0..]);
-        assert_eq!(smargs[0..], smargs[..8]);
-        assert_eq!(smargs[..8], smargs[0..8]);
-        assert_eq!(smargs[0..8], indexable_args[0..8]);
+        // True AND NOT False
+        let computation = a1 && !a2.parse::<bool>().unwrap();
 
-        assert_eq!(smargs[2..6], indexable_args[2..6]);
-        assert_eq!(smargs[3..3], indexable_args[3..3]);
+        assert!(computation);
+    }
 
-        assert_eq!(smargs["h"], "300");
-        assert_eq!(smargs["w"], "300");
-        assert_eq!(smargs["output"], "scaled.png");
-        assert_eq!(smargs["verbose"], "true");
-        assert!(smargs.has("verbose"));
-        assert!(!smargs.has("v"));
-        assert_eq!(smargs.first::<String>().unwrap(), smargs[0]);
-        assert_eq!(smargs.first::<String>().unwrap(), String::from("nn"));
+    #[test]
+    fn error_on_duplicates() {
+        // Catch the __first__ duplicate that appears from left to right.
+
+        let err_duplicate = Smargs::builder("Test program")
+            .optional(Some((&['f'], &[])), "Foo", ArgType::False)
+            .optional(Some((&['b'], &[])), "Bar", ArgType::False)
+            .parse::<(bool, bool)>("a -fbfb".split(' ').map(String::from))
+            .unwrap_err();
         assert_eq!(
-            smargs.last::<std::path::PathBuf>().unwrap(),
-            std::path::PathBuf::from("scaled.png")
+            err_duplicate,
+            Error::Duplicate("f".to_owned())
+        );
+
+        let err_duplicate = Smargs::builder("Test program")
+            .optional(Some((&[], &["foo"])), "Foo", ArgType::False)
+            .optional(Some((&[], &["bar"])), "Bar", ArgType::False)
+            .parse::<(bool, bool)>(
+                "a --foo --foo --bar --bar".split(' ').map(String::from)
+            )
+            .unwrap_err();
+        assert_eq!(
+            err_duplicate,
+            Error::Duplicate("foo".to_owned()),
+        );
+
+        let err_duplicate = Smargs::builder("Test program")
+            .optional(Some((&['f'], &[])), "Foo", ArgType::False)
+            .optional(Some((&['b'], &[])), "Bar", ArgType::False)
+            .optional(Some((&[], &["baz"])), "Baz", ArgType::False)
+            .parse::<(bool, bool, bool)>(
+                "a -fb --baz -bf --baz".split(' ').map(String::from)
+            )
+            .unwrap_err();
+        assert_eq!(
+            err_duplicate,
+            Error::Duplicate("b".to_owned()),
         );
     }
 
     #[test]
-    fn test_smargs_first_last() {
-        let args = "foo.exe 42".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.first::<u32>().unwrap(), 42);
-        assert_eq!(smargs.last::<u32>().unwrap(), 42);
+    fn multi_character_option() {
+        let (b, a, r, bar) :
+            (bool, bool, String, bool) =
+            Smargs::builder("Test program")
+            .optional(Some((&['b'], &[])), "Bee", ArgType::False)
+            .optional(Some((&['a'], &[])), "Ay", ArgType::False)
+            .optional(Some((&['r'], &[])), "Are", ArgType::Other("some-default"))
+            .optional(Some((&[], &["bar"])), "Bar", ArgType::False)
+            .parse("a -bar r-arg-value --bar".split(' ').map(String::from))
+            .unwrap();
+        assert!(b);
+        assert!(a);
+        assert_eq!(r, "r-arg-value");
+        assert!(bar);
 
-        let args = "foo.exe 42 bar baz".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.first::<u32>().unwrap(), 42);
-        assert!(match smargs.last::<u32>().unwrap_err() {
-            SmargError::Parsing(_) => true,
-            _ => false,
-        });
-        assert_eq!(smargs.last::<String>().unwrap(), String::from("baz"));
-    }
-
-    #[test]
-    fn test_smargs_nth() {
-        let args = "foo.exe 42".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert_eq!(smargs.nth::<u32>(0).unwrap(), 42);
-        assert_eq!(smargs.nth::<u32>(smargs.len() - 1).unwrap(), 42);
-
-        {
-            assert_eq!(smargs.len(), 1);
-            assert!(match smargs.nth::<u32>(1).unwrap_err() {
-                SmargError::Position(1) => true,
-                    _ => false,
-            });
-            // (Test that the inner list length does not effect.)
-            assert!(match smargs.nth::<u32>(2).unwrap_err() {
-                SmargError::Position(2) => true,
-                    _ => false,
-            });
-        }
-
-        let args = "foo.exe 42 bar baz".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-
-        assert_eq!(smargs.nth::<u32>(0).unwrap(), 42);
-        assert_eq!(smargs.nth::<String>(0).unwrap(), String::from("42"));
-
-        assert_eq!(smargs.nth::<String>(1).unwrap(), String::from("bar"));
-        assert!(match smargs.nth::<u32>(1).unwrap_err() {
-            SmargError::Parsing(_) => true,
-            _ => false,
-        });
-
-        assert_eq!(smargs.nth::<String>(2).unwrap(), String::from("baz"));
-    }
-
-    #[test]
-    fn test_smargs_exe() {
-        let args = "foo.exe".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        assert!(match smargs.first::<u32>().unwrap_err() {
-            SmargError::Position(0) => true,
-            _ => false,
-        });
-        assert!(match smargs.last::<u32>().unwrap_err() {
-            SmargError::Position(0) => true,
-            _ => false,
-        });
-        assert_eq!(smargs.exe(), &String::from("foo.exe"));
-    }
-
-    #[test]
-    fn test_smargs_duplicates() {
-        let args = "some.exe -fofo".split(' ').map(String::from);
-        let double_flag = Smargs::new(args);
-        // Catch the first duplicate that appears from left to right
-        assert_eq!(
-            double_flag,
-            Err(SmargsInitError::Duplicate(Token::Flag('f')))
-        );
-
-        let args = "some.exe --foo --foo --bar --bar".split(' ')
-            .map(String::from);
-        let double_word = Smargs::new(args);
-        assert_eq!(
-            double_word,
-            Err(SmargsInitError::Duplicate(Token::Word(String::from("foo"))))
-        );
-
-        let args = "some.exe -fo -of --bar --bar".split(' ')
-            .map(String::from);
-        let double_flag = Smargs::new(args);
-        assert_eq!(
-            double_flag,
-            Err(SmargsInitError::Duplicate(Token::Flag('o')))
-        );
-    }
-
-    #[test]
-    fn test_combined_key_value() {
-        let args = "some.exe -bar r-arg-value --bar"
-            .split(' ')
-            .map(String::from);
-        let diff_types = Smargs::new(args).unwrap();
-        assert_eq!(diff_types["b"].parse::<bool>().unwrap(), true);
-        assert_eq!(diff_types["a"].parse::<bool>().unwrap(), true);
-        assert_eq!(diff_types["r"], "r-arg-value");
-        assert_eq!(diff_types["bar"].parse::<bool>().unwrap(), true);
-
-        let args = "some.exe -bar --verbose -f 4.2"
-            .split(' ')
-            .map(String::from);
-        let multiple = Smargs::new(args).unwrap();
-        assert_eq!(multiple["b"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["a"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["r"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["verbose"].parse::<bool>().unwrap(), true);
-        assert_eq!(multiple["f"].parse::<f32>().unwrap(), 4.2);
+        let (b, a, r, verbose, f) :
+            (bool, bool, bool, bool, f32) =
+            Smargs::builder("Test program")
+            .optional(Some((&['b'], &[])), "Bee", ArgType::False)
+            .optional(Some((&['a'], &[])), "Ay", ArgType::False)
+            .optional(Some((&['r'], &[])), "Are", ArgType::False)
+            .optional(Some((&[], &["verbose"])), "Verbose", ArgType::False)
+            .optional(Some((&['f'], &[])), "Foo", ArgType::Other("666"))
+            .parse("a -bar --verbose -f 4.2".split(' ').map(String::from))
+            .unwrap();
+        assert!(a);
+        assert!(b);
+        assert!(r);
+        assert!(verbose);
+        assert_eq!(f, 4.2);
     }
 
 
     #[test]
-    fn test_smargs_empty() {
-        let smargs = Smargs::new(std::iter::empty());
-        assert_eq!(smargs, Err(SmargsInitError::Empty));
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_empty_key() {
-        let args = "some.exe foo".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs[""];
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_not_a_key() {
-        let args = "some.exe foo bar".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs["foo"];
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_index_out_of_bounds() {
-        let args = "some.exe foo bar".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs[2];
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_smargs_range_out_of_bounds() {
-        let args = "some.exe foo bar".split(' ').map(String::from);
-        let smargs = Smargs::new(args).unwrap();
-        let _ = smargs[0..3];
+    fn error_on_empty() {
+        let err_empty = Smargs::builder("Test program")
+            .optional(Some((&['f'], &[])), "Foo", ArgType::False)
+            .optional(Some((&['b'], &[])), "Bar", ArgType::False)
+            .parse::<(bool, bool)>(std::iter::empty())
+            .unwrap_err();
+        assert_eq!(err_empty, Error::Empty);
     }
 }
