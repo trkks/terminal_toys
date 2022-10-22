@@ -59,20 +59,14 @@ impl ArgMap {
         let list: Vec<(bool, String)> = args
             // Ignore the executable.
             .skip(1)
-            // Remove now unneeded values from inbetween.
-            .map(|s| match Self::key_prefix_len(&s) {
-                0 => (s, 0),
-                n => (s, n),
-            })
             // Remove the cli-syntax off of keys and normalize the
             // multi-character groups.
-            .fold(Vec::new(), |mut acc, (s, n)| {
+            .fold(Vec::new(), |mut acc, s| {
+                let n = Self::key_prefix_len(&s);
                 if n == 1 {
-                    // Handle the possibility of multi-character group.
+                    // Multi-character group.
                     acc.extend(
-                        s.chars()
-                            .skip(1)
-                            .map(|c| (true, c.to_string()))
+                        s.chars().skip(1).map(|c| (true, c.to_string()))
                     );
                 } else {
                     acc.push((n > 0, s.chars().skip(n).collect()));
@@ -239,7 +233,7 @@ impl Smargs {
     }
 
     /// Parse the argument strings into the type `T` according to the
-    /// definition of `self`.
+    /// definition of `self` which may include default values for some.
     pub fn parse<T>(
         mut self,
         args: impl Iterator<Item=String>,
@@ -249,46 +243,22 @@ impl Smargs {
    {
         let mut am = ArgMap::new(args)?;
 
-        // Split the arguments into 1) kv-pairs and flags or 2) "operands".
-
-        // Populate the list of values by trying to find a matching value
-        // from args or based on "strategy" of the SmargKind.
-
-        // Fill correct indices based on keys first and position second.
-        // FIXME Does not work when key and positional arguments are mixed.
+        // First, fill correct indices based on keys.
         self.resolve_kv_pairs(&mut am);
-        println!("{:?}", self.values);
-        println!("{:?}", am.list);
-        self.parse_positionals_left(am)?;
+
+        // Replace all the rest in order after the options are filtered out.
+        for (x, y) in iter::zip(
+            self.values.iter_mut().filter(|x| x.is_none()),
+            am  .list  .iter_mut().filter(|x| x.is_some()),
+        ) {
+            x.replace(y.take().unwrap());
+        }
+
         // TODO Instead of parsing into the values here, maybe return some
         // abstraction like "IntermediateElemT_i" or "FakeT_i" (or perhaps
         // `std::any::Any`?) that could be used to identify the boolean at
         // runtime(?) (and thus get rid of ArgType::False).
         T::try_from(self)
-    }
-
-    fn parse_positionals_left(&mut self, mut am: ArgMap) -> Result<(), Error> {
-        let unresolved_defs =
-            self.values.iter_mut()
-                // Enumerate for the Required-error -.-
-                .enumerate()
-                .zip(self.defins.iter())
-                // TODO Use Options here because
-                // stringorientedprogrammingconsideredbad...
-                .filter(|((_, s), _)| s.is_none());
-
-        // Zip with the left args after kv-pairs and flags are filtered out.
-        // TODO Holy heck that's some tuples.
-        for (((i, value), Smarg { keys, kind }), val_opt)
-            in unresolved_defs.zip(am.list.iter_mut().filter(|x| x.is_some()))
-        {
-            //if let SmargKind::Required = kind {
-            //    return Err(Error::Required(i, keys.clone()));
-            //}
-            value.replace(val_opt.take().unwrap());
-        }
-
-        Ok(())
     }
 
     fn resolve_kv_pairs(&mut self, am: &mut ArgMap) {
