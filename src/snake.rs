@@ -41,6 +41,10 @@ impl InputHandler {
             }
             let mut s = String::new();
             stdin.read_line(&mut s).unwrap();  // Blocks
+            // Undo the RETURN resulted from input by moving to previous line.
+            print!("\x1b[F");
+            let _ = std::io::stdout().flush();
+
             let input = match &s.as_str().trim().to_lowercase()[..] {
                 "w" => Input::Up,
                 "s" => Input::Down,
@@ -51,6 +55,8 @@ impl InputHandler {
             if let Input::Undefined = input {
                 if s.contains("q") {
                     quit_sender.lock().unwrap().send(()).unwrap();
+                    // Move back to the bottom.
+                    println!("\x1b[{}E", H + 1);
                     break;
                 }
             } else if let Err(_) = input_sender.send(input) {
@@ -137,10 +143,11 @@ impl LogicHandler {
                 let mut stdout_handle = stdout.lock();
                 let _ = stdout_handle.write(
                     format!(
-                        "\x1b[2J\x1b[0;0H{}\n{}{}",
-                        horizontal_edge,
+                        "{}\n{}{}\x1b[{}D\x1b[{}A",
+                        &horizontal_edge[1..], // Leave a column for the input.
                         view,
                         horizontal_edge,
+                        W + 2, H + 1,
                     )
                     .as_bytes()
                 );
@@ -150,7 +157,7 @@ impl LogicHandler {
             let snake_ate_self = snake[1..].iter()
                 .any(|p| p.x == snake[0].x && p.y == snake[0].y);
             if snake_ate_self {
-                println!("\nGAME OVER. ([RETURN] to quit)");
+                println!("\x1b[{}E\nGAME OVER. ([RETURN] to quit)", H + 1);
                 quit_sender.lock().unwrap().send(()).unwrap();
                 break;
             }
