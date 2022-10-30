@@ -139,9 +139,19 @@ macro_rules! color_println {
 /// # Examples of modules to be logged from and their names
 /// - `crate::foo::bar    => bar`
 /// - `crate::baz::qux::* => baz`
+///
+/// # Example
+/// ```
+/// terminal_toys::log!("Index {}", "Value");
+/// terminal_toys::log!(
+///     "{:05} {:>5}\n{:05} {:>5?}",
+///     42, true,
+///     64, "fail",
+/// );
+/// ```
 #[macro_export]
 macro_rules! log {
-    ($($message:expr),+) => {
+    ($($message:expr),+ $(,)?) => {
         {
             if let Some(value) = option_env!("TTOYSLOG") {
                 if module_path!().split("::").any(|m| value.contains(m)) {
@@ -163,11 +173,16 @@ macro_rules! log {
 /// ```
 /// use terminal_toys::{Color, color_log};
 /// const TTOYSLOG_COLOR: Color = Color::Red;
-/// color_log!("This log is {}", "red");
+/// terminal_toys::color_log!("Index {}", "Value");
+/// terminal_toys::color_log!(
+///     "{:05} {:>5}\n{:05} {:>5?}",
+///     42, true,
+///     64, "fail",
+/// );
 /// ```
 #[macro_export]
 macro_rules! color_log {
-    ($($message:expr),+) => {
+    ($($message:expr),+ $(,)?) => {
         if let Some(value) = option_env!("TTOYSLOG") {
             if module_path!().split("::").any(|m| value.contains(m)) {
                 // Print message with its formatting
