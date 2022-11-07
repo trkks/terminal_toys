@@ -2,7 +2,7 @@
 Thingamajigs to make command-line programs more user- and developer-friendly.
 
 ## Smargs
-- Program argument options like `--file ./my/file/path.txt` and `-r 42` will be automatically parsed to the types needed.
+- Program argument options you define (e.g. the path in `--file ./my/file/path.txt` or 42 in `-n 42`) will be automatically parsed from strings to the needed types. 
 - Return fitting help messages when:
   - Arguments could not be parsed correctly,
   - Duplicates of an option were found (TODO Allow lists when so required e.g. `grep -f file1 -f file2 ...`),
@@ -11,12 +11,12 @@ Thingamajigs to make command-line programs more user- and developer-friendly.
 
 ### Example: 
 ```rs
-// Program arguments are: 'tupletize.exe -v --amount 3 "foo bar"'
+// Program arguments: 'repeat.exe -v --amount 3 "foo bar"'
 let (n, s, verbose) : (usize, String, bool) =
-  Smargs::builder("Tupletize!")
-    .required(Some((&[], &["amount"])), "Amount of items in the tuple")
+  Smargs::builder("Repeat!")
+    .required(Some((&[], &["amount"])), "Amount of repeats")
     .required(None, "The string to repeat")
-    .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
+    .optional(Some((&['v'], &["verbose"])), "Print information about the result", ArgType::False)
     .from_env()?;
 ```
 
