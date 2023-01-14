@@ -27,6 +27,7 @@ pub enum Color {
     BrightCyan,
     BrightWhite,
 }
+
 impl Color {
     /// Return the color's ANSI-code -string for printing.
     pub fn code(&self) -> &'static str {
@@ -76,15 +77,8 @@ impl Color {
 /// # Example
 /// ```
 /// use terminal_toys::{Color, color_print};
-/// // Color the output red and format it like with `std::print`
-/// color_print!(
-///     Color::Red,
-///     "Hey {:A>6}, why the long {}?",
-///     "Alice",
-///     if 1 < 2 { "face" } else { "phase" },
-/// );
-///
-/// color_print!(Color::Green, "foo");
+/// color_print!(Color::Red, "{} - Bad request: {}", 400, "foo",);
+/// match Some(42) { Some(n) => color_print!(Color::Green, "OK"), _ => { } }
 /// ```
 #[macro_export]
 macro_rules! color_print {
@@ -109,18 +103,9 @@ macro_rules! color_print {
 /// Same as `terminal_toys::color_print` but appends a newline at the end.
 /// # Example
 /// ```
-/// use terminal_toys::{Color, color_println};
-/// color_println!(
-///     Color::BrightRed,
-///     "Printing in {}",
-///     "RED",
-/// );
-///
-/// let opt = Some("foo");
-/// match opt {
-///     Some(s) => color_println!(Color::Green, "{}", s),
-///     None    => color_println!(Color::Red, "Not found"),
-/// }
+/// use terminal_toys::{color_println, Color};
+/// color_println!(Color::Red, "{} - Bad request: {}", 400, "foo",);
+/// match Some(42) { Some(n) => color_println!(Color::Green, "OK"), _ => { } }
 /// ```
 #[macro_export]
 macro_rules! color_println {
@@ -134,30 +119,27 @@ macro_rules! color_println {
 }
 
 /// Log a message from module `x` IF an environment variable `TTOYSLOG` has
-/// been set to contain a name associated with path of the module `x`.
+/// been set to a module path containing the name of module `x`.
 ///
 /// # Examples of modules to be logged from and their names
-/// - `crate::foo::bar    => bar`
-/// - `crate::baz::qux::* => baz`
+/// - `TTOYSLOG=bar` -> log's from module `foo::bar`
+/// - `TTOYSLOG=foo` -> log's from modules `foo`, `foo::bar`, `foo::bar::baz`
 ///
 /// # Example
 /// ```
-/// terminal_toys::log!("Index {}", "Value");
-/// terminal_toys::log!(
-///     "{:05} {:>5}\n{:05} {:>5?}",
-///     42, true,
-///     64, "fail",
-/// );
+/// use terminal_toys::log;
+/// log!("Did a {} with {}", "thing", "stuff",);
+/// match Some(42) { Some(n) => log!("OK"), _ => log!("fail") }
 /// ```
 #[macro_export]
 macro_rules! log {
     ($($message:expr),+ $(,)?) => {
-        {
-            if let Some(value) = option_env!("TTOYSLOG") {
-                if module_path!().split("::").any(|m| value.contains(m)) {
-                    // Print message with its formatting
-                    println!($($message),+);
-                }
+        if let Some(value) = option_env!("TTOYSLOG") {
+            let full_path = module_path!();
+            if full_path.split("::").any(|m| value.contains(m)) {
+                print!("[{}:{}] ", full_path, line!());
+                // Print message with its formatting.
+                println!($($message),+);
             }
         }
     };
@@ -166,28 +148,30 @@ macro_rules! log {
 /// Same as the `log`-macro, but color the output according to color variable
 /// `TTOYSLOG_COLOR` found in scope.
 ///
-/// NOTE The module to log from is required to contain a constant `Color` in
-/// the form `TTOYSLOG_COLOR`!
+/// NOTE The module to log from is required to contain a constant named
+/// `TTOYSLOG_COLOR` and type `Color`!
 ///
 /// # Example:
 /// ```
+/// // Logs printing out in red.
 /// use terminal_toys::{Color, color_log};
-/// const TTOYSLOG_COLOR: Color = Color::Red;
-/// terminal_toys::color_log!("Index {}", "Value");
-/// terminal_toys::color_log!(
-///     "{:05} {:>5}\n{:05} {:>5?}",
-///     42, true,
-///     64, "fail",
-/// );
+/// const TTOYSLOG_COLOR: Color = Color::Yellow;
+/// color_log!("Did a {} with {}", "thing", "stuff",);
+/// match Some(42) { Some(n) => color_log!("OK"), _ => color_log!("fail") }
 /// ```
 #[macro_export]
 macro_rules! color_log {
     ($($message:expr),+ $(,)?) => {
         if let Some(value) = option_env!("TTOYSLOG") {
-            if module_path!().split("::").any(|m| value.contains(m)) {
+            let full_path = module_path!();
+            if full_path.split("::").any(|m| value.contains(m)) {
+                terminal_toys::color_print!(
+                    TTOYSLOG_COLOR, "[{}:{}] ", full_path, line!()
+                );
                 // Print message with its formatting
                 terminal_toys::color_println!(TTOYSLOG_COLOR, $($message),+);
             }
         }
     };
 }
+
