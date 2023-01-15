@@ -414,6 +414,65 @@ where
     }
 }
 
+impl<T1, T2, T3, T4, T5, T6> TryFrom<Smargs> for (T1, T2, T3, T4, T5, T6)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+    T4: FromStr,
+    <T4 as FromStr>::Err: error::Error,
+    T5: FromStr,
+    <T5 as FromStr>::Err: error::Error,
+    T6: FromStr,
+    <T6 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+            smargs.parse_nth(3)?,
+            smargs.parse_nth(4)?,
+            smargs.parse_nth(5)?,
+        ))
+    }
+}
+
+impl<T1, T2, T3, T4, T5, T6, T7> TryFrom<Smargs> for (T1, T2, T3, T4, T5, T6, T7)
+where
+    T1: FromStr,
+    <T1 as FromStr>::Err: error::Error,
+    T2: FromStr,
+    <T2 as FromStr>::Err: error::Error,
+    T3: FromStr,
+    <T3 as FromStr>::Err: error::Error,
+    T4: FromStr,
+    <T4 as FromStr>::Err: error::Error,
+    T5: FromStr,
+    <T5 as FromStr>::Err: error::Error,
+    T6: FromStr,
+    <T6 as FromStr>::Err: error::Error,
+    T7: FromStr,
+    <T7 as FromStr>::Err: error::Error,
+{
+    type Error = Error;
+    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+        Ok((
+            smargs.parse_nth(0)?,
+            smargs.parse_nth(1)?,
+            smargs.parse_nth(2)?,
+            smargs.parse_nth(3)?,
+            smargs.parse_nth(4)?,
+            smargs.parse_nth(5)?,
+            smargs.parse_nth(6)?,
+        ))
+    }
+}
+
 impl<T1, T2, T3, T4, T5, T6, T7, T8> TryFrom<Smargs> for (T1, T2, T3, T4, T5, T6, T7, T8)
 where
     T1: FromStr,
