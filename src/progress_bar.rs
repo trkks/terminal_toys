@@ -59,7 +59,7 @@ impl ProgressBar {
     /// based on update count relative to `source_len`
     pub fn new(source_len: usize, bar_len: usize) -> Self {
         // A bar's length is the length of content not '\r', '[' or ']'
-        let bar: Vec<u8> = iter::repeat('.' as u8).take(bar_len).collect();
+        let bar: Vec<u8> = iter::repeat(b'.').take(bar_len).collect();
         let title = String::from("Progress");
         let row = 0;
         let prefix = Self::prefix_from(row, &title);
@@ -139,19 +139,19 @@ impl ProgressBar {
         self.source_progress += 1;
         if self.source_progress % self.threshold == 0 {
             let index = self.bar.iter()
-                .position(|x| *x == '.' as u8)
+                .position(|x| *x == b'.')
                 .unwrap_or(0);
-            self.bar[index] = '=' as u8;
+            self.bar[index] = b'=';
             return true
         }
-        return false
+        false
     }
 
     /// Print based on terminal row on which to position the bar.
     fn print(&mut self) -> IOResult<()> {
         // Flag to choose the right ending based on the bar being full or not
         let bar_progress = self.bar.iter()
-            .rposition(|x| *x == '=' as u8)
+            .rposition(|x| *x == b'=')
             .unwrap_or(0) + 1;
         let bar_full = self.bar.len() <= bar_progress;
 
@@ -176,7 +176,7 @@ impl ProgressBar {
         // Write into stdout
         // NOTE Stdout needs to be locked for the write operations
         let mut handle = self.out.lock();
-        handle.write(bytes.as_slice())?;
+        handle.write_all(bytes.as_slice())?;
         handle.flush()
     }
 

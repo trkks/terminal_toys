@@ -86,7 +86,7 @@ impl ArgMap {
                 .filter_map(|(i, (is_option, s))| is_option.then_some((s, i)))
         {
             // Insert into dict and Err if key was already found.
-            if let Some(_) = dict.insert(key.clone(), value) {
+            if dict.insert(key.clone(), value).is_some() {
                 // TODO Earlier, a clone wasn't needed here...
                 return Err(Error::Duplicate(key.clone()))
             }
@@ -100,7 +100,7 @@ impl ArgMap {
 
     fn key_prefix_len(s: &str) -> usize {
         let prefix_len = s.chars().take(2).take_while(|c| *c == '-').count();
-        if let Some(fst_char_of_key) = s.chars().skip(prefix_len).next() {
+        if let Some(fst_char_of_key) = s.chars().nth(prefix_len) {
             if !fst_char_of_key.is_ascii_digit() {
                 return prefix_len
             }
@@ -198,7 +198,7 @@ impl Smargs {
     /// and its arguments.
     ///
     /// `description` is the general description of the program.
-    pub fn builder(description: &str) -> Self {
+    pub fn builder(_description: &str) -> Self {
         Self { defins: Vec::new(), values: Vec::new() }
     }
 
@@ -300,7 +300,7 @@ impl Smargs {
     fn push_arg(
         &mut self,
         keys: Option<(&[char], &[&str])>,
-        description: &str,
+        _description: &str,
         kind: SmargKind,
     ) {
         let keys = if let Some((cs, ss)) = keys {
@@ -320,13 +320,13 @@ impl Smargs {
         <T as FromStr>::Err: error::Error,
     {
         self.values.get_mut(index)
-            .expect(&format!("Smargs.values constructed incorrectly: None in index {}", index))
+            .unwrap_or_else(|| panic!("Smargs.values constructed incorrectly: None in index {}", index))
             .take()
             .ok_or(Error::Position(index))?
             .parse()
             .map_err(
                 |e: <T as FromStr>::Err| Error::Parsing(
-                    format!("#{} {}", index, e.to_string())
+                    format!("#{} {}", index, e)
                 )
             )
     }

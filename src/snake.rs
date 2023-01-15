@@ -53,13 +53,13 @@ impl InputHandler {
                 _   => Input::Undefined,
             };
             if let Input::Undefined = input {
-                if s.contains("q") {
+                if s.contains('q') {
                     quit_sender.lock().unwrap().send(()).unwrap();
                     // Move back to the bottom.
                     println!("\x1b[{}E", H + 1);
                     break;
                 }
-            } else if let Err(_) = input_sender.send(input) {
+            } else if input_sender.send(input).is_err() {
                 break;
             }
         });
@@ -79,11 +79,11 @@ impl LogicHandler {
         let mut apple = V2 { x: 9, y: 3 };
         let mut dir = V2 { x: 0, y: -1 };
         let horizontal_edge = String::from_utf8(
-            std::iter::repeat('#' as u8).take(W + 2).collect::<Vec<u8>>()
+            std::iter::repeat(b'#').take(W + 2).collect::<Vec<u8>>()
         )
         .unwrap();
         let logic_handle = thread::spawn(move || loop {
-            if let Ok(_) = quit_rec.lock().unwrap().try_recv() {
+            if quit_rec.lock().unwrap().try_recv().is_ok() {
                 break;
             }
             let input = match input_rec.try_recv() {
@@ -131,10 +131,8 @@ impl LogicHandler {
                 new_p
             };
 
-            for i in 1..snake.len() {
-                let temp = snake[i];
-                snake[i] = last_head;
-                last_head = temp;
+            for part in snake.iter_mut().skip(1) {
+                std::mem::swap(part, &mut last_head);
             }
 
             if snake[0].x == apple.x && snake[0].y == apple.y {
@@ -143,8 +141,8 @@ impl LogicHandler {
                 apple.y = (rand::random::<f32>() * H as f32) as i32;
             }
 
-            for i in 0..W*H {
-                board[i] = '.';
+            for part in board.iter_mut() {
+                *part = '.';
             }
             board[(snake[0].y * W as i32 + snake[0].x) as usize] = 'H';
             snake.iter()

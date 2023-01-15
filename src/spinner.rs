@@ -32,12 +32,12 @@ where
         let mut i = 0;
         let mut stdout = io::stdout();
         // Make sure everything's flushed before FIXME Sometimes not work?
-        let _ = stdout.flush().unwrap();
+        stdout.flush().unwrap();
         // This is to not print spinner on existing text
         let _ = stdout.write(b"   ").unwrap();
 
         loop {
-            if let Ok(_) = receiver.try_recv() {
+            if receiver.try_recv().is_ok() {
                 // Wipe the spinner with spaces
                 let _ = stdout.write(b"\x1b[3D   \n").unwrap();
                 break;
@@ -49,7 +49,7 @@ where
             // Write the next animation frame
             i += 1;
             let _ = stdout.write(sequences[i % 4]).unwrap();
-            let _ = stdout.flush().unwrap();
+            stdout.flush().unwrap();
         }
     });
 
