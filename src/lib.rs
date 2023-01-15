@@ -7,6 +7,9 @@ pub mod smargs;
 pub use progress_bar::ProgressBar;
 pub use smargs::{Smargs, ArgType};
 
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
 
 #[derive(Debug)]
 pub enum Color {
