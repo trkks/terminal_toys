@@ -4,17 +4,61 @@ use std::time::Duration;
 use std::thread;
 
 
+pub trait Animation {
+    type Output;
+    fn start<B: io::Write>(buffer: B) -> io::Result<(Self::Output, Self)> where Self: Sized;
+    fn update<B: io::Write>(&mut self, buffer: B) -> io::Result<Self::Output>;
+    fn finish<B: io::Write>(&mut self, buffer: B) -> io::Result<usize>;
+}
+
+struct Spinner {
+    frames: usize,
+}
+
+impl Animation for Spinner {
+    type Output = ();
+
+    // # Panics
+    // This will panic if writing the buffer fails for some reason.
+    fn start<B: io::Write>(mut buffer: B) -> io::Result<(Self::Output, Self)> {
+        // This is to not print spinner on existing text
+        let _ = buffer.write(b"   ").unwrap();
+        Ok(((), Self { frames: 0 }))
+    }
+
+    // # Panics
+    // This will panic if writing or flushing the buffer fails for some reason.
+    fn update<B: io::Write>(&mut self, mut buffer: B) -> io::Result<Self::Output> {
+        // Pace the spinning animation
+        thread::sleep(Duration::from_millis(100));
+
+        self.frames += 1;
+        const SEQUENCES: [&[u8; 7]; 4]  =
+             [b"\x1b[3D(|)",b"\x1b[3D(/)",b"\x1b[3D(-)",b"\x1b[3D(\\)"];
+
+        let _ = buffer.write(SEQUENCES[self.frames % 4]).unwrap();
+        buffer.flush().unwrap();
+
+        Ok(())
+    }
+
+    fn finish<B: io::Write>(&mut self, mut buffer: B) -> io::Result<usize> {
+        // Wipe the spinner with spaces
+        buffer.write(b"\x1b[3D   \n")
+    }
+}
+
 /// Starts a spinner animation at the current terminal print position
 /// that runs until the end of `concrete_job`, showing that it is processing
 /// # Example:
 /// ```
 /// let result = terminal_toys::spinner::start_spinner(||
 ///     std::iter::repeat(2).take(20).fold(44040192, |acc, x| acc / x)
-/// );
+/// ).unwrap();
 /// // (The spinner spins at the end of the line while computing the result)
 /// assert_eq!(result, 42);
 /// ```
-pub fn start_spinner<T, F>(concrete_job: F) -> T
+pub fn start_spinner<T, F>(job: F) -> io::Result<T>
 where
     F: FnOnce() -> T,
 {
@@ -25,39 +69,26 @@ where
 
     // Start the spinner in another thread
     let spinner_job = thread::spawn(move || {
-
-        let sequences =
-            [b"\x1b[3D(|)",b"\x1b[3D(/)",b"\x1b[3D(-)",b"\x1b[3D(\\)"];
-
-        let mut i = 0;
-        let mut stdout = io::stdout();
         // Make sure everything's flushed before FIXME Sometimes not work?
+        let mut stdout = io::stdout();
         stdout.flush().unwrap();
-        // This is to not print spinner on existing text
-        let _ = stdout.write(b"   ").unwrap();
+
+        let mut spinner = Spinner::start(&stdout).unwrap().1;
 
         loop {
             if receiver.try_recv().is_ok() {
-                // Wipe the spinner with spaces
-                let _ = stdout.write(b"\x1b[3D   \n").unwrap();
-                break;
+                break spinner.finish(&stdout);
             };
 
-            // Pace the spinning animation
-            thread::sleep(Duration::from_millis(100));
-
             // Write the next animation frame
-            i += 1;
-            let _ = stdout.write(sequences[i % 4]).unwrap();
-            stdout.flush().unwrap();
+            spinner.update(&stdout)?;
         }
     });
 
     // Run the job
-    let result = concrete_job();
+    let result = job();
     // When finished, signal spinner to terminate
     sender.send(true).unwrap();
     // Wait for the termination
-    let _ = spinner_job.join();
-    result
+    spinner_job.join().unwrap().map(|_| result)
 }
