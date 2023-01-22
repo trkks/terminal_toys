@@ -657,4 +657,76 @@ mod tests {
             .unwrap_err();
         assert_eq!(err_empty, Error::Empty);
     }
+    
+    #[test]
+    fn parse_tuples() {
+        let mut n = 2;
+
+        n += 1;
+        let (a, b)
+            : (u8, u8)
+            = Smargs::builder(&format!("{} bytes", n - 1))
+                .required(None, "1").required(None, "2")
+                .parse(std::iter::once("exe".to_string()).chain((1..n).map(|x| x.to_string()))).unwrap();
+        assert_eq!(a, 1); assert_eq!(b, 2);
+
+        n += 1;
+        let (a, b, c)
+            : (u8, u8, u8)
+            = Smargs::builder(&format!("{} bytes", n - 1))
+                .required(None, "1").required(None, "2").required(None, "3")
+                .parse(std::iter::once("exe".to_string()).chain((1..n).map(|x| x.to_string()))).unwrap();
+        assert_eq!(a, 1); assert_eq!(b, 2); assert_eq!(c, 3);
+
+        n += 1;
+        let (a, b, c, d)
+            : (u8, u8, u8, u8)
+            = Smargs::builder(&format!("{} bytes", n - 1))
+                .required(None, "1").required(None, "2").required(None, "3")
+                .required(None, "4")
+                .parse(std::iter::once("exe".to_string()).chain((1..n).map(|x| x.to_string()))).unwrap();
+        assert_eq!(a, 1); assert_eq!(b, 2); assert_eq!(c, 3); assert_eq!(d, 4);
+
+        n += 1;
+        let (a, b, c, d, e)
+            : (u8, u8, u8, u8, u8)
+            = Smargs::builder(&format!("{} bytes", n - 1))
+                .required(None, "1").required(None, "2").required(None, "3")
+                .required(None, "4").required(None, "5")
+                .parse(std::iter::once("exe".to_string()).chain((1..n).map(|x| x.to_string()))).unwrap();
+        assert_eq!(a, 1); assert_eq!(b, 2); assert_eq!(c, 3); assert_eq!(d, 4);
+        assert_eq!(e, 5);
+
+        n += 1;
+        let (a, b, c, d, e, f)
+            : (u8, u8, u8, u8, u8, u8)
+            = Smargs::builder(&format!("{} bytes", n - 1))
+                .required(None, "1").required(None, "2").required(None, "3")
+                .required(None, "4").required(None, "5").required(None, "6")
+                .parse(std::iter::once("exe".to_string()).chain((1..n).map(|x| x.to_string()))).unwrap();
+        assert_eq!(a, 1); assert_eq!(b, 2); assert_eq!(c, 3); assert_eq!(d, 4);
+        assert_eq!(e, 5); assert_eq!(f, 6);
+
+        n += 1;
+        let (a, b, c, d, e, f, g)
+            : (u8, u8, u8, u8, u8, u8, u8)
+            = Smargs::builder(&format!("{} bytes", n - 1))
+                .required(None, "1").required(None, "2").required(None, "3")
+                .required(None, "4").required(None, "5").required(None, "6")
+                .required(None, "7")
+                .parse(std::iter::once("exe".to_string()).chain((1..n).map(|x| x.to_string()))).unwrap();
+        assert_eq!(a, 1); assert_eq!(b, 2); assert_eq!(c, 3); assert_eq!(d, 4);
+        assert_eq!(e, 5); assert_eq!(f, 6); assert_eq!(g, 7);
+
+        n += 1;
+        let (a, b, c, d, e, f, g, h)
+            : (u8, u8, u8, u8, u8, u8, u8, u8)
+            = Smargs::builder(&format!("{} bytes", n - 1))
+                .required(None, "1").required(None, "2").required(None, "3")
+                .required(None, "4").required(None, "5").required(None, "6")
+                .required(None, "7").required(None, "8")
+                .parse(std::iter::once("exe".to_string()).chain((1..n).map(|x| x.to_string()))).unwrap();
+        assert_eq!(a, 1); assert_eq!(b, 2); assert_eq!(c, 3); assert_eq!(d, 4);
+        assert_eq!(e, 5); assert_eq!(f, 6); assert_eq!(g, 7); assert_eq!(h, 8);
+    }
 }
