@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::error;
 use std::fmt;
 use std::iter;
@@ -34,93 +33,57 @@ impl fmt::Display for Error {
 
 impl error::Error for Error {}
 
-/// A mapping from keys to indices to strings:
-/// > ArgMap[Key] == Index -> ArgMap[Index] == String
+/// Normalize/preprocess the CLI-syntax (most notably do "-bar" => "-b -a -r").
 ///
-/// Key-value pairs are roughly based on the rough syntax:
-/// > Key := -Alph Value | --Alph Value
-/// 
-/// Value is a superset of Alph, which means is not always clear when a string
-/// is a key or a value. This means, that some strings meant as values for
-/// example "--my-username--" will be presented as being keys. However for
-/// example "-42" is strictly considered a value.
-struct ArgMap {
-    list: Vec<Option<String>>,
-    dict: HashMap<String, usize>,
+/// Return `Option<(bool, String)>` in order to deal with argument positions
+/// later. The bool represents if the argument is an option, which needs to be
+/// added to the dict.
+fn normalize(args: impl Iterator<Item=String>) -> Vec<Option<(bool, String)>> {
+    args
+        // Ignore the executable. TODO Allow saving exe with a .exe() -method?
+        .skip(1)
+        // Remove the cli-syntax off of keys and normalize the
+        // multi-character groups.
+        .fold(Vec::new(), |mut acc, s| {
+            let n = key_prefix_len(&s);
+            if n == 1 {
+                // Multi-character group.
+                acc.extend(
+                    s.chars().skip(1).map(|c| Some((true, c.to_string())))
+                );
+            } else {
+                // Also remove any other length prefixes starting with '-'.
+                acc.push(Some((n > 0, s.chars().skip(n).collect())));
+            }
+            acc
+        })
 }
 
-impl ArgMap {
-    /// Collect the strings in `args` into a list and map ones that __might__
-    /// be keys to __their__ corresponding index in said list.
-    fn new(
-        args: impl Iterator<Item = String>,
-    ) -> Result<ArgMap, Error> {
-        // "Normalized" representation of the original arguments.
-        // The bool represents if the argument is an option, which needs to be
-        // added to the dict.
-        let list: Vec<(bool, String)> = args
-            // Ignore the executable.
-            .skip(1)
-            // Remove the cli-syntax off of keys and normalize the
-            // multi-character groups.
-            .fold(Vec::new(), |mut acc, s| {
-                let n = Self::key_prefix_len(&s);
-                if n == 1 {
-                    // Multi-character group.
-                    acc.extend(
-                        s.chars().skip(1).map(|c| (true, c.to_string()))
-                    );
-                } else {
-                    acc.push((n > 0, s.chars().skip(n).collect()));
-                }
-                acc
-            });
+/// Return the amount of preceding '-'-characters or 0 if the first character of
+/// the rest of the string is a number.
+fn key_prefix_len(s: &str) -> usize {
+    // TODO Why take(2)?
+    // TODO Error if typo "--2" when meant "-2" (negative 2)?
+    let prefix_len = s.chars().take(2).take_while(|c| *c == '-').count();
+    if let Some(fst_char_of_key) = s.chars().nth(prefix_len) {
+        if !fst_char_of_key.is_ascii_digit() {
+            return prefix_len
+        }
+    }
+    0
+}
 
-        if list.is_empty() { return Err(Error::Empty) }
-
-        // TODO This could be snappier as a `Result.collect()`, but couldn't
-        // figure it out.
-        // Save handles to the list's indices for all options.
-        let mut dict = HashMap::with_capacity(list.len());
-        for (key, value)
-            in list.iter()
-                .enumerate()
-                .filter_map(|(i, (is_option, s))| is_option.then_some((s, i)))
-        {
-            // Insert into dict and Err if key was already found.
-            if dict.insert(key.clone(), value).is_some() {
-                // TODO Earlier, a clone wasn't needed here...
-                return Err(Error::Duplicate(key.clone()))
+/// Search list of args (which might be values denoted by `false`) for the first
+/// match of the given key. Return the index of found match.
+fn find_matching_idx(args: &mut Vec<Option<(bool, String)>>, key: &String) -> Option<usize> {
+    args.iter_mut().enumerate().find_map(|(i, opt)| {
+        if let Some((true, arg)) = opt {
+            if arg == key {
+                return Some(i)
             }
         }
-
-        Ok(ArgMap {
-            list: list.into_iter().map(|(_, s)| Some(s)).collect(),
-            dict
-        })
-    }
-
-    fn key_prefix_len(s: &str) -> usize {
-        let prefix_len = s.chars().take(2).take_while(|c| *c == '-').count();
-        if let Some(fst_char_of_key) = s.chars().nth(prefix_len) {
-            if !fst_char_of_key.is_ascii_digit() {
-                return prefix_len
-            }
-        }
-        0
-    }
-
-    /// Find, return and replace with `None` the __first__ matching "token"
-    /// based on some keys.
-    fn pop(&mut self, keys: &[String]) -> Option<(usize, String)> {
-        match keys.iter().find_map(|key| self.dict.get(key)) {
-            Some(&i) if i < self.list.len() => {
-                let token = self.list[i].take().unwrap();
-                Some((i, token))
-            },
-            _ => None,
-        }
-    }
+        None
+    })
 }
 
 #[derive(Debug)]
@@ -268,17 +231,22 @@ impl Smargs {
     where
         T: TryFrom<Smargs, Error=Error>,
    {
-        let mut am = ArgMap::new(args)?;
+        let mut args = normalize(args);
 
-        // First, fill correct indices based on keys.
-        self.resolve_kv_pairs(&mut am);
+        if args.is_empty() {
+            return Err(Error::Empty)
+        }
 
-        // Replace all the rest in order after the options are filtered out.
+        // Fill in matching values based on keys.
+        self.resolve_kv_pairs(&mut args);
+
+        // Replace all the rest in order after the options (and optionals) are
+        // filtered out.
         for (x, y) in iter::zip(
             self.values.iter_mut().filter(|x| x.is_none()),
-            am  .list  .iter_mut().filter(|x| x.is_some()),
+            args       .iter_mut().filter(|x| x.is_some()),
         ) {
-            x.replace(y.take().unwrap());
+            x.replace(y.take().unwrap().1);
         }
 
         // TODO Instead of parsing into the values here, maybe return some
@@ -288,31 +256,44 @@ impl Smargs {
         T::try_from(self)
     }
 
-    fn resolve_kv_pairs(&mut self, am: &mut ArgMap) {
+    /// Select the values for arguments based on idenified keys.
+    /// 
+    /// Key-value pairs are roughly based on the rough syntax:
+    /// > Key := -Alph Value | --Alph Value
+    /// 
+    /// Value is a superset of Alph, which means is not always clear when a string
+    /// is a key or a value. This means, that some strings meant as values for
+    /// example "--my-username--" will be presented as being keys. However for
+    /// example "-42" is strictly considered a value.
+    fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(bool, String)>>) {
         self.values = self.defins.iter()
-            .map(|Smarg { keys, kind }|
+            .map(|Smarg { keys, kind }| {
+                let opt = keys.iter().find_map(|x| find_matching_idx(args, x));
+
                 // TODO Somehow despookify this if?
-                // TODO This sort of indexing makes it feel like ArgMap is
-                // useless: how much better can the dict be compared to
-                // linearly searching for the key-string?
-                if let Some((key_idx, _)) = am.pop(keys) {
+                if let Some(key_idx) = opt {
+                    // Remove the now unneeded key.
+                    args[key_idx] = None;
                     Some(
                         if let SmargKind::Flag = kind {
                             true.to_string()
                         } else {
                             // Take the subsequent, key-matching, value.
-                            am.list[key_idx + 1].take().unwrap()
+                            args[key_idx + 1].take().unwrap().1
                         }
                     )
                 } else {
-                    // Flags default to false here if a match is not found.
+                    // Handle the case when a match is not found for the key.
                     match kind { 
+                        // Flag defaults to false here.
                         SmargKind::Flag              => Some(false.to_string()),
+                        // Optional is replaced by its specified default.
                         SmargKind::Optional(default) => Some(default.clone()),
+                        // Required will need to be found based on its position.
                         SmargKind::Required          => None
                     }
                 }
-            )
+            })
             .collect();
     }
 
@@ -333,7 +314,7 @@ impl Smargs {
         kind: SmargKind,
     ) {
         let keys = if let Some((cs, ss)) = keys {
-            iter::once(cs.iter().collect::<String>())
+            cs.iter().map(|c| c.to_string())
                 .chain(ss.iter().map(|y| y.to_string()))
                 .collect()
         } else {
@@ -348,15 +329,16 @@ impl Smargs {
         T: FromStr,
         <T as FromStr>::Err: error::Error,
     {
-        self.values.get_mut(index)
+        let value = self.values.get_mut(index)
             // TODO This seems unnecessarily complex...
             .unwrap_or_else(|| panic!("Smargs.values constructed incorrectly: None in index {}", index))
             .take()
-            .ok_or(Error::Position(index))?
+            .ok_or(Error::Position(index))?;
+        value
             .parse()
             .map_err(
                 |e: <T as FromStr>::Err| Error::Parsing(
-                    format!("#{} {}", index, e)
+                    format!("#{}:'{}' - {}", index, value, e)
                 )
             )
     }
@@ -539,23 +521,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Smargs, ArgMap, Error, ArgType};
-
-    #[test]
-    fn argmap_use_case() {
-        let am = ArgMap::new(
-            "scale_img.exe ./img.png -v -w 1366 -h -768 --output scaled.png"
-                .split(' ')
-                .map(String::from)
-            )
-            .unwrap();
-
-        assert_eq!(am.dict.len(), 4);
-        assert_eq!(am.dict["v"], 1);
-        assert_eq!(am.dict["w"], 2);
-        assert_eq!(am.dict["h"], 4);
-        assert_eq!(am.dict["output"], 6);
-    }
+    use super::{Smargs, Error, ArgType};
 
     #[test]
     fn general_use_case() {
