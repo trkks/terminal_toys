@@ -36,8 +36,10 @@ impl error::Error for Error {}
 
 /// A mapping from keys to indices to strings:
 /// > ArgMap[Key] == Index -> ArgMap[Index] == String
+///
 /// Key-value pairs are roughly based on the rough syntax:
 /// > Key := -Alph Value | --Alph Value
+/// 
 /// Value is a superset of Alph, which means is not always clear when a string
 /// is a key or a value. This means, that some strings meant as values for
 /// example "--my-username--" will be presented as being keys. However for
@@ -146,46 +148,71 @@ pub enum ArgType<'a> {
 /// SiMpler thAn wRiting it once aGain Surely :)
 ///
 /// # Examples:
-/// Here the execution of a program is guided by command-line arguments in
-/// order to create the string `(foo bar, foo bar, foo bar)`.
+/// Program arguments will be defined using the builder:
+/// ```
+/// use terminal_toys::{Smargs, ArgType};
+/// 
+/// let builder = Smargs::builder("Register for service")
+///     .optional(Some((&[], &["no-newsletter"])), "Opt-out from receiving newsletter", ArgType::False)
+///     .required(None, "Your full name")
+///     .optional(Some((&['d'], &[])), "Email address domain", ArgType::Other("getspam"))
+///     .required(Some((&['a'], &["age"])), "Your age");
+/// ```
+/// The different arguments will be recognized from the command line syntax and
+/// parsed into usable types:
 /// ```
 /// # fn main() -> Result<(), String> {
-/// use terminal_toys::{Smargs, ArgType};
-/// let (n, s, verbose) : (usize, String, bool) =
-///     Smargs::builder("Tupletize!")
-///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
-///         .required(None, "The string to repeat")
-///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
-///         .parse(
-///             vec!["tupletize.exe", "-v", "--amount", "3", "foo bar"]
-///                 .into_iter().map(String::from)
-///         )
-///         .map_err(|e| format!("Argument failure: {}", e))?;
+/// # use terminal_toys::{Smargs, ArgType};
+/// # let builder = Smargs::builder("Register for service")
+/// #    .optional(Some((&[], &["no-newsletter"])), "Opt-out from receiving newsletter", ArgType::False)
+/// #    .required(None, "Your full name")
+/// #    .optional(Some((&['d'], &[])), "Email address domain", ArgType::Other("getspam"))
+/// #    .required(Some((&['a'], &["age"])), "Your age");
+/// # let mut newsletter_subscribers = vec![];
+/// let args = vec!["register.exe", "--no-newsletter", "-a", "26", "-d", "hatch", "Matt Myman"].into_iter().map(String::from);
+/// 
+/// let (no_news, name, domain, age)
+///     : (bool, String, String, usize)
+///     = builder.parse(args).map_err(|e| format!("Argument failure: {}", e))?;
 ///
-/// let result = format!("({})", vec![s.clone(); n].join(", "));
-///
-/// if verbose {
-///     println!("Character count: {}", result.len()); // Character count: 27
+/// if age < 18 {
+///     let ys = 18 - age;
+///     let putdown = format!(
+///         "come back in {}",
+///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
+///     );
+///     eprintln!("Failed to register: {}", putdown);
 /// }
 ///
-/// assert_eq!(result, "(foo bar, foo bar, foo bar)".to_owned());
+/// let user_email = format!("{}.{}@{}.com", name, age, domain).replace(' ', ".").to_lowercase();
+///
+/// let subscriber_count = newsletter_subscribers.len();
+/// if !no_news {
+///     newsletter_subscribers.push(&user_email);
+/// }
+/// 
+/// assert_eq!(user_email, "matt.myman.26@hatch.com".to_string());
+/// assert_eq!(newsletter_subscribers.len(), subscriber_count);
 /// # Ok(()) }
 /// ```
-/// Or with just ordered arguments and the verbose flag defaulted to `true`:
+/// Required arguments can also be passed based on position defined by the
+/// calling order of the builder-methods. Missing but optional arguments use the
+/// given default value.
 /// ```
-/// use terminal_toys::{Smargs, ArgType};
-/// let (n, s, verbose) : (usize, String, bool) =
-///     Smargs::builder("Tupletize!")
-///         .required(Some((&[], &["amount"])), "Amount of items in the tuple")
-///         .required(None, "The string to repeat")
-///         .optional(Some((&['v'], &[])), "Print information about the result", ArgType::False)
-///         .parse(
-///             vec!["tupletize.exe", "3", "foo bar"].into_iter().map(String::from)
-///         )
-///         .unwrap();
-/// assert_eq!(n, 3);
-/// assert_eq!(s, "foo bar");
-/// assert!(!verbose);
+/// # use terminal_toys::{Smargs, ArgType};
+/// # let builder = Smargs::builder("Register for service")
+/// #    .optional(Some((&[], &["no-newsletter"])), "Opt-out from receiving newsletter", ArgType::False)
+/// #    .required(None, "Your full name")
+/// #    .optional(Some((&['d'], &[])), "Email address domain", ArgType::Other("getspam"))
+/// #    .required(Some((&['a'], &["age"])), "Your age");
+/// let args = vec!["register.exe", "Matt Myman", "26"].into_iter().map(String::from);
+/// 
+/// let (no_news, name, domain, age) : (bool, String, String, usize) = builder.parse(args).unwrap();
+///
+/// assert!(!no_news);
+/// assert_eq!(name, "Matt Myman".to_string());
+/// assert_eq!(domain, "getspam".to_string());
+/// assert_eq!(age, 26);
 /// ```
 #[derive(Debug)]
 pub struct Smargs {
@@ -269,18 +296,20 @@ impl Smargs {
                 // useless: how much better can the dict be compared to
                 // linearly searching for the key-string?
                 if let Some((key_idx, _)) = am.pop(keys) {
-                    if let SmargKind::Flag = kind {
-                        Some(true.to_string())
-                    } else {
-                        // Take the following value.
-                        Some(am.list[key_idx + 1].take().unwrap())
-                    }
+                    Some(
+                        if let SmargKind::Flag = kind {
+                            true.to_string()
+                        } else {
+                            // Take the subsequent, key-matching, value.
+                            am.list[key_idx + 1].take().unwrap()
+                        }
+                    )
                 } else {
                     // Flags default to false here if a match is not found.
-                    if let SmargKind::Flag = kind {
-                        Some(false.to_string())
-                    } else {
-                        None
+                    match kind { 
+                        SmargKind::Flag              => Some(false.to_string()),
+                        SmargKind::Optional(default) => Some(default.clone()),
+                        SmargKind::Required          => None
                     }
                 }
             )
@@ -300,7 +329,7 @@ impl Smargs {
     fn push_arg(
         &mut self,
         keys: Option<(&[char], &[&str])>,
-        _description: &str,
+        description: &str,
         kind: SmargKind,
     ) {
         let keys = if let Some((cs, ss)) = keys {
@@ -320,6 +349,7 @@ impl Smargs {
         <T as FromStr>::Err: error::Error,
     {
         self.values.get_mut(index)
+            // TODO This seems unnecessarily complex...
             .unwrap_or_else(|| panic!("Smargs.values constructed incorrectly: None in index {}", index))
             .take()
             .ok_or(Error::Position(index))?
@@ -572,6 +602,23 @@ mod tests {
         let computation = a1 && !a2.parse::<bool>().unwrap();
 
         assert!(computation);
+    }
+
+    #[test]
+    fn mixed_positions() {
+        let builder = Smargs::builder("Test program")
+           .optional(Some((&[], &["foo"])), "Foo", ArgType::False)
+           .required(None, "Bar")
+           .optional(Some((&['b'], &[])), "Baz", ArgType::Other("Lorem"))
+           .required(Some((&['q'], &["qux"])), "Qux");
+        let args = vec!["a", "Bar Bar", "42"].into_iter().map(String::from);
+ 
+        let (foo, bar, baz, qux) : (bool, String, String, usize) = builder.parse(args).unwrap();
+
+        assert!(!foo);
+        assert_eq!(bar, "Bar Bar".to_string());
+        assert_eq!(baz, "Lorem".to_string());
+        assert_eq!(qux, 42);
     }
 
     #[test]
