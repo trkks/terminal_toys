@@ -694,6 +694,47 @@ mod tests {
         assert_eq!(f, 4.2);
     }
 
+    #[test]
+    fn multiple_char_keys_different_types() {
+        let (bar, foo, baz) :
+            (usize, f32, String) =
+            Smargs::builder("Test program")
+            .optional(Some((&['f', 'o'],      &["bar"])), "Bar", ArgType::Other("42"))
+            .optional(Some((&['b', 'a', 'r'], &["foo"])), "Foo", ArgType::Other("3.14"))
+            .required(None, "Baz")
+            .parse("a BazArg --bar 666".split(' ').map(String::from))
+            .unwrap();
+        assert_eq!(bar, 666);
+        assert!(3.1 < foo && foo < 3.2);
+        assert_eq!(baz, "BazArg".to_owned());
+    }
+    
+    #[test]
+    fn multiple_char_keys_same_types() {
+        let (bar, foo, baz) :
+            (bool, bool, bool) =
+            Smargs::builder("Test program")
+            .optional(Some((&['f', 'o'],      &["bar"])), "Bar", ArgType::False)
+            .optional(Some((&['b', 'a', 'r'], &["foo"])), "Foo", ArgType::False)
+            .optional(Some((&['z'],           &["baz"])), "Baz", ArgType::False)
+            .parse("a --foo -f".split(' ').map(String::from))
+            .unwrap();
+        assert!(bar);
+        assert!(foo);
+        assert!(!baz);
+
+        let (bar, foo, baz) :
+            (usize, usize, usize) =
+            Smargs::builder("Test program")
+            .optional(Some((&['f', 'o'],      &["bar"])), "Bar", ArgType::Other("42"))
+            .optional(Some((&['b', 'a', 'r'], &["foo"])), "Foo", ArgType::Other("3"))
+            .required(None, "Baz")
+            .parse("a 123 --bar 666".split(' ').map(String::from))
+            .unwrap();
+        assert_eq!(bar, 666);
+        assert_eq!(foo, 3);
+        assert_eq!(baz, 123);
+    }
 
     #[test]
     fn error_on_empty() {
