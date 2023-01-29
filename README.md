@@ -14,12 +14,14 @@ Thingamajigs to make command-line programs more user- and developer-friendly.
 ```rust
 # use terminal_toys::{Smargs, ArgType};
 let program_args = vec!["repeat.exe", "-v", "--amount", "3", "foo bar"];
+
 let (n, s, verbose) : (usize, String, bool) =
   Smargs::builder("Repeat!")
-    .required(Some((&[], &["amount"])), "Amount of repeats")
-    .required(None, "The string to repeat")
-    .optional(Some((&['v'], &["verbose"])), "Print information about the result", ArgType::False)
+    .required(vec!["amount"], "Amount of repeats")
+    .required(vec![], "The string to repeat")
+    .optional(vec!["v", "verbose"], "Print information about the result", ArgType::False)
     .parse(program_args.into_iter().map(String::from))?;
+
 assert_eq!(n, 3);
 assert_eq!(s, "foo bar");
 assert!(verbose);
