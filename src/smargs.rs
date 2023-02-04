@@ -18,6 +18,7 @@ pub enum Error {
     Empty,
     Missing { expected: usize, count: usize },
     Smarg { argument: Smarg, kind: ErrorKind },
+    // TODO Add a check and an error for non-defined arguments in args-input.
 }
 
 /// Offer nicer error-messages to user.
@@ -313,6 +314,10 @@ impl Smargs {
                         true.to_string()
                     } else {
                         // Take the subsequent, key-matching, value.
+                        // FIXME Panix here (when a defined option is the last
+                        // arg but receives no value?)
+                        // Reproduce with:
+                        // cargo run --example smargs "moth man" -a 41 -d
                         args[key_idx + 1].take().unwrap().1
                     })
                 } else {
