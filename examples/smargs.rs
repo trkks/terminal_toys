@@ -24,13 +24,13 @@ impl From<(bool, String, String, usize)> for Input {
 fn main() -> Result<(), String> {
     let builder = Smargs::builder("Register for service")
         .optional(
-            vec!["no-newsletter"],
+            ["no-newsletter"],
             "Opt-out from receiving newsletter",
             ArgType::False,
         )
-        .required(vec![], "Your full name")
-        .optional(vec!["d"], "Email address domain", ArgType::Other("getspam"))
-        .required(vec!["a", "age"], "Your age");
+        .required([], "Your full name")
+        .optional(["d"], "Email address domain", ArgType::Other("getspam"))
+        .required(["a", "age"], "Your age");
 
     let mut newsletter_subscribers = vec![];
 

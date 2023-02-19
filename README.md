@@ -17,9 +17,9 @@ let program_args = vec!["repeat.exe", "-v", "--amount", "3", "foo bar"];
 
 let (n, s, verbose) : (usize, String, bool) =
   Smargs::builder("Repeat!")
-    .required(vec!["amount"], "Amount of repeats")
-    .required(vec![], "The string to repeat")
-    .optional(vec!["v", "verbose"], "Print information about the result", ArgType::False)
+    .required(["amount"], "Amount of repeats")
+    .required([], "The string to repeat")
+    .optional(["v", "verbose"], "Print information about the result", ArgType::False)
     .parse(program_args.into_iter().map(String::from))?;
 
 assert_eq!(n, 3);

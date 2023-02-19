@@ -153,10 +153,10 @@ pub enum ArgType<'a> {
 /// use terminal_toys::{Smargs, ArgType};
 ///
 /// let builder = Smargs::builder("Register for service")
-///     .optional(vec!["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
-///     .required(vec![],                "Your full name")
-///     .optional(vec!["d"],             "Email address domain", ArgType::Other("getspam"))
-///     .required(vec!["a", "age"],      "Your age");
+///     .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
+///     .required([],                "Your full name")
+///     .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
+///     .required(["a", "age"],      "Your age");
 /// ```
 /// The different arguments will be recognized from the command line syntax and
 /// parsed into usable types:
@@ -164,10 +164,10 @@ pub enum ArgType<'a> {
 /// # fn main() -> Result<(), String> {
 /// # use terminal_toys::{Smargs, ArgType};
 /// # let builder = Smargs::builder("Register for service")
-/// #    .optional(vec!["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
-/// #    .required(vec![],                "Your full name")
-/// #    .optional(vec!["d"],             "Email address domain", ArgType::Other("getspam"))
-/// #    .required(vec!["a", "age"],      "Your age");
+/// #    .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
+/// #    .required([],                "Your full name")
+/// #    .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
+/// #    .required(["a", "age"],      "Your age");
 /// # let mut newsletter_subscribers = vec![];
 /// let args = vec!["register.exe", "--no-newsletter", "-a", "26", "-d", "hatch", "Matt Myman"].into_iter().map(String::from);
 ///
@@ -202,10 +202,10 @@ pub enum ArgType<'a> {
 /// ```
 /// # use terminal_toys::{Smargs, ArgType};
 /// # let builder = Smargs::builder("Register for service")
-/// #    .optional(vec!["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
-/// #    .required(vec![],                "Your full name")
-/// #    .optional(vec!["d"],             "Email address domain", ArgType::Other("getspam"))
-/// #    .required(vec!["a", "age"],      "Your age");
+/// #    .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
+/// #    .required([],                "Your full name")
+/// #    .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
+/// #    .required(["a", "age"],      "Your age");
 /// let args = vec!["register.exe", "Matt Myman", "26"].into_iter().map(String::from);
 ///
 /// let (no_news, name, domain, age) : (bool, String, String, usize) = builder.parse(args).unwrap();
@@ -234,7 +234,7 @@ impl Smargs {
     }
 
     /// Define next an argument which __needs__ to be provided by the user.
-    pub fn required(mut self, keys: Vec<&'static str>, description: &str) -> Self {
+    pub fn required<const N: usize>(mut self, keys: [&'static str; N], description: &str) -> Self {
         self.push_arg(keys, description, SmargKind::Required);
         self
     }
@@ -245,9 +245,9 @@ impl Smargs {
     /// A boolean argument defaults to FALSE because using a flag essentially
     /// means signaling the event of or __turning on__ something, certainly not
     /// the contrary.
-    pub fn optional(
+    pub fn optional<const N: usize>(
         mut self,
-        keys: Vec<&'static str>,
+        keys: [&'static str; N],
         description: &str,
         default: ArgType,
     ) -> Self {
@@ -345,7 +345,7 @@ impl Smargs {
 
     /// Perform common operations for defining an argument in order
     /// and TODO: generate a user-friendly description for it.
-    fn push_arg(&mut self, keys: Vec<&'static str>, description: &str, kind: SmargKind) {
+    fn push_arg<const N: usize>(&mut self, keys: [&'static str; N], description: &str, kind: SmargKind) {
         // Check for duplicates keys in user definition TODO This could
         // theoretically be done at compile time...or probably a lot cleaner...
         if let Some((def, duplicate_key)) = self.defins.iter().find_map(|def| {
@@ -360,7 +360,7 @@ impl Smargs {
                 duplicate_key, def
             )
         } else {
-            self.defins.push(Smarg { keys, kind });
+            self.defins.push(Smarg { keys: keys.to_vec(), kind });
         }
     }
 
@@ -589,15 +589,15 @@ mod tests {
 
         let (a1, a2, a3, a4, a5): (PathBuf, u32, u32, bool, PathBuf) =
             Smargs::builder("A program to scale an image")
-                .required(vec![], "Path to the image")
-                .required(vec!["w", "width"], "The width to scale into")
-                .required(vec!["h", "height"], "The height to scale into")
+                .required([], "Path to the image")
+                .required(["w", "width"], "The width to scale into")
+                .required(["h", "height"], "The height to scale into")
                 .optional(
-                    vec!["v", "verbose"],
+                    ["v", "verbose"],
                     "Print realtime status of operations",
                     ArgType::False,
                 )
-                .optional(vec!["o", "output"], "Output path", ArgType::Other("a"))
+                .optional(["o", "output"], "Output path", ArgType::Other("a"))
                 .parse(
                     "scale_img.exe -v ./img.png -w 1366 -h 768 --output scaled.png"
                         .split(" ")
@@ -619,8 +619,8 @@ mod tests {
     fn confused_flag_option() {
         let (a1, a2): (bool, String) =
             Smargs::builder("Compute P AND NOT Q from a bool and a string")
-                .optional(vec!["b", "bool"], "A bool", ArgType::False)
-                .required(vec![], "A string representing another bool")
+                .optional(["b", "bool"], "A bool", ArgType::False)
+                .required([], "A string representing another bool")
                 .parse("a -b false".split(" ").map(String::from))
                 .unwrap();
 
@@ -633,10 +633,10 @@ mod tests {
     #[test]
     fn mixed_positions() {
         let builder = Smargs::builder("Test program")
-            .optional(vec!["foo"], "Foo", ArgType::False)
-            .required(vec![], "Bar")
-            .optional(vec!["b"], "Baz", ArgType::Other("Lorem"))
-            .required(vec!["q", "qux"], "Qux");
+            .optional(["foo"], "Foo", ArgType::False)
+            .required([], "Bar")
+            .optional(["b"], "Baz", ArgType::Other("Lorem"))
+            .required(["q", "qux"], "Qux");
         let args = vec!["a", "Bar Bar", "42"].into_iter().map(String::from);
 
         let (foo, bar, baz, qux): (bool, String, String, usize) = builder.parse(args).unwrap();
@@ -651,34 +651,34 @@ mod tests {
     #[should_panic]
     fn error_definition_duplicates_flag() {
         Smargs::builder("Test program")
-            .optional(vec!["f"], "Foo", ArgType::False)
-            .optional(vec!["f"], "Bar", ArgType::False);
+            .optional(["f"], "Foo", ArgType::False)
+            .optional(["f"], "Bar", ArgType::False);
     }
 
     #[test]
     #[should_panic]
     fn error_definition_duplicates_flag2() {
         Smargs::builder("Test program")
-            .optional(vec!["f", "b"], "Foo", ArgType::False)
-            .optional(vec!["a"], "Bar", ArgType::False)
-            .optional(vec!["b", "f"], "Baz", ArgType::False);
+            .optional(["f", "b"], "Foo", ArgType::False)
+            .optional(["a"], "Bar", ArgType::False)
+            .optional(["b", "f"], "Baz", ArgType::False);
     }
 
     #[test]
     #[should_panic]
     fn error_definition_duplicates_word() {
         Smargs::builder("Test program")
-            .optional(vec!["foo"], "Foo", ArgType::False)
-            .optional(vec!["foo"], "Bar", ArgType::False);
+            .optional(["foo"], "Foo", ArgType::False)
+            .optional(["foo"], "Bar", ArgType::False);
     }
 
     #[test]
     #[should_panic]
     fn error_definition_duplicates_word2() {
         Smargs::builder("Test program")
-            .optional(vec!["foo"], "Foo", ArgType::False)
-            .optional(vec!["bar"], "Bar", ArgType::False)
-            .optional(vec!["baz", "foo"], "Baz", ArgType::False);
+            .optional(["foo"], "Foo", ArgType::False)
+            .optional(["bar"], "Bar", ArgType::False)
+            .optional(["baz", "foo"], "Baz", ArgType::False);
     }
 
     /// Catch the __first__ duplicate that appears from left to right TODO __if__ the
@@ -688,8 +688,8 @@ mod tests {
     fn error_arg_duplicates() {
 
         let err_duplicate = Smargs::builder("Test program")
-            .optional(vec!["f"], "Foo", ArgType::False)
-            .optional(vec!["b"], "Bar", ArgType::False)
+            .optional(["f"], "Foo", ArgType::False)
+            .optional(["b"], "Bar", ArgType::False)
             .parse::<(bool, bool)>("a -fbfb".split(" ").map(String::from))
             .unwrap_err();
         assert_eq!(
@@ -698,8 +698,8 @@ mod tests {
         );
 
         let err_duplicate = Smargs::builder("Test program")
-            .optional(vec!["foo"], "Foo", ArgType::False)
-            .optional(vec!["bar"], "Bar", ArgType::False)
+            .optional(["foo"], "Foo", ArgType::False)
+            .optional(["bar"], "Bar", ArgType::False)
             .parse::<(bool, bool)>(
                 "a --foo --foo --bar --bar".split(" ").map(String::from)
             )
@@ -710,9 +710,9 @@ mod tests {
         );
 
         let err_duplicate = Smargs::builder("Test program")
-            .optional(vec!["f"], "Foo", ArgType::False)
-            .optional(vec!["b"], "Bar", ArgType::False)
-            .optional(vec!["baz"], "Baz", ArgType::False)
+            .optional(["f"], "Foo", ArgType::False)
+            .optional(["b"], "Bar", ArgType::False)
+            .optional(["baz"], "Baz", ArgType::False)
             .parse::<(bool, bool, bool)>(
                 "a -fb --baz -bf --baz".split(" ").map(String::from)
             )
@@ -727,10 +727,10 @@ mod tests {
     #[test]
     fn multi_character_option() {
         let (b, a, r, bar): (bool, bool, String, bool) = Smargs::builder("Test program")
-            .optional(vec!["b"], "Bee", ArgType::False)
-            .optional(vec!["a"], "Ay", ArgType::False)
-            .optional(vec!["r"], "Are", ArgType::Other("some-default"))
-            .optional(vec!["bar"], "Bar", ArgType::False)
+            .optional(["b"], "Bee", ArgType::False)
+            .optional(["a"], "Ay", ArgType::False)
+            .optional(["r"], "Are", ArgType::Other("some-default"))
+            .optional(["bar"], "Bar", ArgType::False)
             .parse("a -bar r-arg-value --bar".split(" ").map(String::from))
             .unwrap();
         assert!(b);
@@ -739,11 +739,11 @@ mod tests {
         assert!(bar);
 
         let (b, a, r, verbose, f): (bool, bool, bool, bool, f32) = Smargs::builder("Test program")
-            .optional(vec!["b"], "Bee", ArgType::False)
-            .optional(vec!["a"], "Ay", ArgType::False)
-            .optional(vec!["r"], "Are", ArgType::False)
-            .optional(vec!["verbose"], "Verbose", ArgType::False)
-            .optional(vec!["f"], "Foo", ArgType::Other("666"))
+            .optional(["b"], "Bee", ArgType::False)
+            .optional(["a"], "Ay", ArgType::False)
+            .optional(["r"], "Are", ArgType::False)
+            .optional(["verbose"], "Verbose", ArgType::False)
+            .optional(["f"], "Foo", ArgType::Other("666"))
             .parse("a -bar --verbose -f 4.2".split(" ").map(String::from))
             .unwrap();
         assert!(a);
@@ -756,9 +756,9 @@ mod tests {
     #[test]
     fn multiple_char_keys_different_types() {
         let (bar, foo, baz): (usize, f32, String) = Smargs::builder("Test program")
-            .optional(vec!["f", "o", "bar"], "Bar", ArgType::Other("42"))
-            .optional(vec!["b", "a", "r", "foo"], "Foo", ArgType::Other("3.14"))
-            .required(vec![], "Baz")
+            .optional(["f", "o", "bar"], "Bar", ArgType::Other("42"))
+            .optional(["b", "a", "r", "foo"], "Foo", ArgType::Other("3.14"))
+            .required([], "Baz")
             .parse("a BazArg --bar 666".split(" ").map(String::from))
             .unwrap();
         assert_eq!(bar, 666);
@@ -769,9 +769,9 @@ mod tests {
     #[test]
     fn multiple_char_keys_same_types() {
         let (bar, foo, baz): (bool, bool, bool) = Smargs::builder("Test program")
-            .optional(vec!["f", "o", "bar"], "Bar", ArgType::False)
-            .optional(vec!["b", "a", "r", "foo"], "Foo", ArgType::False)
-            .optional(vec!["z", "baz"], "Baz", ArgType::False)
+            .optional(["f", "o", "bar"], "Bar", ArgType::False)
+            .optional(["b", "a", "r", "foo"], "Foo", ArgType::False)
+            .optional(["z", "baz"], "Baz", ArgType::False)
             .parse("a --foo -f".split(" ").map(String::from))
             .unwrap();
         assert!(bar);
@@ -779,9 +779,9 @@ mod tests {
         assert!(!baz);
 
         let (bar, foo, baz): (usize, usize, usize) = Smargs::builder("Test program")
-            .optional(vec!["f", "o", "bar"], "Bar", ArgType::Other("42"))
-            .optional(vec!["b", "a", "r", "foo"], "Foo", ArgType::Other("3"))
-            .required(vec![], "Baz")
+            .optional(["f", "o", "bar"], "Bar", ArgType::Other("42"))
+            .optional(["b", "a", "r", "foo"], "Foo", ArgType::Other("3"))
+            .required([], "Baz")
             .parse("a 123 --bar 666".split(" ").map(String::from))
             .unwrap();
         assert_eq!(bar, 666);
@@ -792,8 +792,8 @@ mod tests {
     #[test]
     fn error_on_empty() {
         match Smargs::builder("Test program")
-            .optional(vec!["f"], "Foo", ArgType::False)
-            .optional(vec!["b"], "Bar", ArgType::False)
+            .optional(["f"], "Foo", ArgType::False)
+            .optional(["b"], "Bar", ArgType::False)
             .parse::<(bool, bool)>(std::iter::empty())
             .unwrap_err()
         {
