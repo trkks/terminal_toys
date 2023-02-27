@@ -315,11 +315,8 @@ impl Smargs {
                 Some(if let SmargKind::Flag = kind {
                     true.to_string()
                 } else {
-                    // Take the subsequent, key-matching, value.
-                    // FIXME Panix here (when a defined option is the last
-                    // arg but receives no value?)
-                    // Reproduce with:
-                    // cargo run --example smargs "moth man" -a 41 -d
+                    // Check existence of and take the subsequent, key-matching,
+                    // value.
                     args.get_mut(key_idx + 1)
                         .ok_or(Error::Smarg {
                             argument: smarg.clone(),
