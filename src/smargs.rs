@@ -9,6 +9,7 @@ use std::str::FromStr;
 #[derive(Debug)]
 pub enum ErrorKind {
     Duplicate,
+    MissingValue,
     Parsing(&'static str, String, Box<dyn error::Error>),
 }
 
@@ -16,7 +17,7 @@ pub enum ErrorKind {
 #[derive(Debug)]
 pub enum Error {
     Empty,
-    Missing { expected: usize, count: usize },
+    NotEnough { expected: usize, count: usize },
     Smarg { argument: Smarg, kind: ErrorKind },
     // TODO Add a check and an error for non-defined arguments in args-input.
 }
@@ -27,7 +28,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
             Self::Empty => String::from("No arguments found"),
-            Self::Missing { expected, count } => {
+            Self::NotEnough { expected, count } => {
                 // TODO "Expected" or "required"? What about "expected _at least_"
                 // in case of (future) list-type arguments?
                 format!("Not enough arguments: expected {}, got {}", expected, count)
@@ -38,6 +39,8 @@ impl fmt::Display for Error {
                 match kind {
                     // TODO Inform how many times the argument was illegally repeated.
                     ErrorKind::Duplicate => format!("Too many entries of this argument"),
+                    // TODO Elaborate on the type of value.
+                    ErrorKind::MissingValue => format!("Option found but missing a value"),
                     ErrorKind::Parsing(tname, input, e) => format!(
                         "Failed to parse the type {} from input '{}' : {}",
                         tname, input, e
@@ -272,7 +275,7 @@ impl Smargs {
         }
 
         // Fill in matching values based on keys.
-        self.resolve_kv_pairs(&mut args);
+        self.resolve_kv_pairs(&mut args)?;
 
         // Replace all the rest in order after the options (and optionals) are
         // filtered out.
@@ -290,7 +293,7 @@ impl Smargs {
         T::try_from(self)
     }
 
-    /// Select the values for arguments based on idenified keys.
+    /// Select the values for arguments based on identified keys.
     ///
     /// Key-value pairs are roughly based on the rough syntax:
     /// > Key := -Alph Value | --Alph Value
@@ -299,40 +302,48 @@ impl Smargs {
     /// is a key or a value. This means, that some strings meant as values for
     /// example "--my-username--" will be presented as being keys. However for
     /// example "-42" is strictly considered a value.
-    fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(bool, String)>>) {
-        self.values = self
-            .defins
-            .iter()
-            .map(|Smarg { keys, kind }| {
-                let opt = keys.iter().find_map(|x| find_matching_idx(args, x));
+    fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(bool, String)>>) -> Result<(), Error> {
+        self.values = Vec::with_capacity(self.defins.len());
 
-                // TODO Somehow despookify this if?
-                if let Some(key_idx) = opt {
-                    // Remove the now unneeded key.
-                    args[key_idx] = None;
-                    Some(if let SmargKind::Flag = kind {
-                        true.to_string()
-                    } else {
-                        // Take the subsequent, key-matching, value.
-                        // FIXME Panix here (when a defined option is the last
-                        // arg but receives no value?)
-                        // Reproduce with:
-                        // cargo run --example smargs "moth man" -a 41 -d
-                        args[key_idx + 1].take().unwrap().1
-                    })
+        for smarg @ Smarg { keys, kind } in &self.defins {
+            let opt = keys.iter().find_map(|x| find_matching_idx(args, x));
+
+            // TODO Somehow despookify this if?
+            let item = if let Some(key_idx) = opt {
+                // Remove the now unneeded key.
+                args[key_idx] = None;
+                Some(if let SmargKind::Flag = kind {
+                    true.to_string()
                 } else {
-                    // Handle the case when a match is not found for the key.
-                    match kind {
-                        // Flag defaults to false here.
-                        SmargKind::Flag => Some(false.to_string()),
-                        // Optional is replaced by its specified default.
-                        SmargKind::Optional(default) => Some(default.clone()),
-                        // Required will need to be found based on its position.
-                        SmargKind::Required => None,
-                    }
+                    // Take the subsequent, key-matching, value.
+                    // FIXME Panix here (when a defined option is the last
+                    // arg but receives no value?)
+                    // Reproduce with:
+                    // cargo run --example smargs "moth man" -a 41 -d
+                    args.get_mut(key_idx + 1)
+                        .ok_or(Error::Smarg {
+                            argument: smarg.clone(),
+                            kind: ErrorKind::MissingValue
+                        })?
+                        .take()
+                        .unwrap()
+                        .1
+                })
+            } else {
+                // Handle the case when a match is not found for the key.
+                match kind {
+                    // Flag defaults to false here.
+                    SmargKind::Flag => Some(false.to_string()),
+                    // Optional is replaced by its specified default.
+                    SmargKind::Optional(default) => Some(default.clone()),
+                    // Required will need to be found based on its position.
+                    SmargKind::Required => None,
                 }
-            })
-            .collect();
+            };
+
+            self.values.push(item);
+        }
+        Ok(())
     }
 
     /// Creates `T` based on a call to `std::env::args`.
@@ -392,7 +403,7 @@ impl Smargs {
                         }
                     })
                     .count();
-                Error::Missing {
+                Error::NotEnough {
                     expected: required_count,
                     count: index - required_count,
                 }
@@ -581,7 +592,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{ArgType, Error, Smargs};
+    use super::{ArgType, Error, Smargs, ErrorKind};
 
     #[test]
     fn general_use_case() {
@@ -797,8 +808,22 @@ mod tests {
             .parse::<(bool, bool)>(std::iter::empty())
             .unwrap_err()
         {
-            Error::Empty => {}
+            Error::Empty => {},
             e => panic!("Expected {:?} got {:?}", Error::Empty, e),
+        }
+    }
+
+    #[test]
+    fn missing_value_at_end() {
+        match Smargs::builder("Test program")
+            .required([], "Foo")
+            .required(["d"], "Bar")
+            .required(["a"], "Baz")
+            .parse::<(String, usize, usize)>("a \"moth man\" -a 41 -d".split(" ").map(String::from))
+            .unwrap_err()
+        {
+            Error::Smarg { argument: _, kind: ErrorKind::MissingValue } => {},
+            e => panic!("Expected {:?} got {:?}", ErrorKind::MissingValue, e),
         }
     }
 }
