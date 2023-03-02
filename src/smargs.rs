@@ -27,21 +27,21 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
-            Self::Empty => String::from("No arguments found"),
+            Self::Empty => String::from("No arguments found."),
             Self::MissingRequired { expected, count } => {
-                // TODO "Expected" or "required"? What about "expected _at least_"
-                // in case of (future) list-type arguments?
-                format!("Not enough arguments: expected {}, got {}", expected, count)
+                // TODO What about "required _at least_ of X" in case of (future)
+                // list-type arguments?
+                format!("Not enough arguments: required {}, got {}.", expected, count)
             }
             Self::Smarg { argument, kind } => format!(
-                "{} - {}",
+                "{} Usage: {}",
                 match kind {
                     // TODO Inform how many times the argument was illegally repeated.
-                    ErrorKind::Duplicate => format!("Too many entries of this argument"),
+                    ErrorKind::Duplicate => format!("Too many entries of this argument."),
                     // TODO Elaborate on the type of value.
-                    ErrorKind::MissingValue => format!("Option argument given but missing the value"),
+                    ErrorKind::MissingValue => format!("Option key used but missing the value."),
                     ErrorKind::Parsing(tname, input, e) => format!(
-                        "Failed to parse the type {} from input '{}' : {}",
+                        "Failed to parse the type {} from input '{}': {}.",
                         tname, input, e
                     ),
                 },
@@ -122,13 +122,13 @@ impl Display for Smarg {
             xs.iter().map(|x| format!("{}{} ", if x.len() == 1 { "-" } else { "--" }, x)).collect()
         };
 
-        let (is_valued, note) = match &self.kind {
-            SmargKind::Required => (true, "Required argument".to_owned()),
-            SmargKind::Optional(default) => (true, format!("Defaults to '{}'", default)),
-            SmargKind::Flag => (false, "Negated by default".to_owned()),
+        let note = match &self.kind {
+            SmargKind::Required => "<required value>".to_owned(),
+            SmargKind::Optional(default) => format!("<value OR '{}'>", default),
+            SmargKind::Flag => "Negated by default".to_owned(),
         };
 
-        write!(f, "{}{} ( {} )", keystring, if is_valued { "<value>"} else { "" }, note)
+        write!(f, "{}{}", keystring, note)
     }
 }
 
@@ -394,6 +394,15 @@ impl Smargs {
                     .iter()
                     .filter(|x| matches!(x.kind, SmargKind::Required))
                     .count();
+                // FIXME Subtract underflow because required args can be defined
+                // after optionals e.g.
+                //   definition [opt("foo"), req, req] # (required_count == 2)
+                // with
+                //   input ["bar"]
+                // results in
+                //   index [     0,     1,    2 ]
+                //   value [ "foo", "bar", NONE ]
+                // thus 2 - (2 + 1) = 2 - 3 = -1_usize => panic
                 Error::MissingRequired {
                     expected: required_count,
                     count: required_count - (index + 1),
