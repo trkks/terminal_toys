@@ -66,7 +66,7 @@ fn main() -> Result<(), String> {
             }
             x => x,
         }
-        .map_err(|e| format!("Argument failure: {}", e))
+        .map_err(|e| e.to_string())
         .map(|x: (bool, String, String, usize)| {
             println!("{:?}", Into::<Input>::into(x.clone()));
             x
