@@ -43,9 +43,9 @@ impl fmt::Display for Error {
                 "{} Usage: {}",
                 match kind {
                     // TODO Inform how many times the argument was illegally repeated.
-                    ErrorKind::Duplicate => format!("Too many entries of this argument."),
+                    ErrorKind::Duplicate => "Too many entries of this argument.".to_owned(),
                     // TODO Elaborate on the type of value.
-                    ErrorKind::MissingValue => format!("Option key used but missing the value."),
+                    ErrorKind::MissingValue => "Option key used but missing the value.".to_owned(),
                     ErrorKind::Parsing(tname, input, e) => format!(
                         "Failed to parse the type {} from input '{}': {}.",
                         tname, input, e
@@ -318,14 +318,13 @@ impl Smargs {
             let all_keys: Vec<&&'static str> = self
                 .defins
                 .iter()
-                .map(|x| x.keys.iter())
-                .flatten()
+                .flat_map(|x| x.keys.iter())
                 .collect();
             for (is_option, value) in args
                 .iter()
                 .map(|x| x.as_ref().expect("bug: args constructed badly"))
             {
-                if *is_option && all_keys.iter().find(|x| x == &&value).is_none() {
+                if *is_option && !all_keys.iter().any(|x| &x == &&value) {
                     return Err(Error::UndefinedKey(value.clone()));
                 }
             }
@@ -392,8 +391,7 @@ impl Smargs {
         if let Some((def, duplicate_key)) = self.defins.iter().find_map(|def| {
             def.keys.iter().find_map(|x| {
                 keys.iter()
-                    .position(|y| y == x)
-                    .and_then(|i| Some((def, keys[i])))
+                    .position(|y| y == x).map(|i| (def, keys[i]))
             })
         }) {
             panic!(
@@ -647,7 +645,7 @@ mod tests {
                 .optional(["o", "output"], "Output path", ArgType::Other("a"))
                 .parse(
                     "scale_img.exe -v ./img.png -w 1366 -h 768 --output scaled.png"
-                        .split(" ")
+                        .split(' ')
                         .map(String::from),
                 )
                 .unwrap();
@@ -668,7 +666,7 @@ mod tests {
             Smargs::builder("Compute P AND NOT Q from a bool and a string")
                 .optional(["b", "bool"], "A bool", ArgType::False)
                 .required([], "A string representing another bool")
-                .parse("a -b false".split(" ").map(String::from))
+                .parse("a -b false".split(' ').map(String::from))
                 .unwrap();
 
         // True AND NOT False
@@ -778,7 +776,7 @@ mod tests {
             .optional(["a"], "Ay", ArgType::False)
             .optional(["r"], "Are", ArgType::Other("some-default"))
             .optional(["bar"], "Bar", ArgType::False)
-            .parse("a -bar r-arg-value --bar".split(" ").map(String::from))
+            .parse("a -bar r-arg-value --bar".split(' ').map(String::from))
             .unwrap();
         assert!(b);
         assert!(a);
@@ -791,7 +789,7 @@ mod tests {
             .optional(["r"], "Are", ArgType::False)
             .optional(["verbose"], "Verbose", ArgType::False)
             .optional(["f"], "Foo", ArgType::Other("666"))
-            .parse("a -bar --verbose -f 4.2".split(" ").map(String::from))
+            .parse("a -bar --verbose -f 4.2".split(' ').map(String::from))
             .unwrap();
         assert!(a);
         assert!(b);
@@ -806,7 +804,7 @@ mod tests {
             .optional(["f", "o", "bar"], "Bar", ArgType::Other("42"))
             .optional(["b", "a", "r", "foo"], "Foo", ArgType::Other("3.14"))
             .required([], "Baz")
-            .parse("a BazArg --bar 666".split(" ").map(String::from))
+            .parse("a BazArg --bar 666".split(' ').map(String::from))
             .unwrap();
         assert_eq!(bar, 666);
         assert!(3.1 < foo && foo < 3.2);
@@ -819,7 +817,7 @@ mod tests {
             .optional(["f", "o", "bar"], "Bar", ArgType::False)
             .optional(["b", "a", "r", "foo"], "Foo", ArgType::False)
             .optional(["z", "baz"], "Baz", ArgType::False)
-            .parse("a --foo -f".split(" ").map(String::from))
+            .parse("a --foo -f".split(' ').map(String::from))
             .unwrap();
         assert!(bar);
         assert!(foo);
@@ -829,7 +827,7 @@ mod tests {
             .optional(["f", "o", "bar"], "Bar", ArgType::Other("42"))
             .optional(["b", "a", "r", "foo"], "Foo", ArgType::Other("3"))
             .required([], "Baz")
-            .parse("a 123 --bar 666".split(" ").map(String::from))
+            .parse("a 123 --bar 666".split(' ').map(String::from))
             .unwrap();
         assert_eq!(bar, 666);
         assert_eq!(foo, 3);
@@ -855,7 +853,7 @@ mod tests {
             .required([], "Foo")
             .required(["d"], "Bar")
             .required(["a"], "Baz")
-            .parse::<(String, usize, usize)>("a \"moth man\" -a 41 -d".split(" ").map(String::from))
+            .parse::<(String, usize, usize)>("a \"moth man\" -a 41 -d".split(' ').map(String::from))
             .unwrap_err()
         {
             Error::Smarg {
@@ -873,7 +871,7 @@ mod tests {
             .required([], "A required arg")
             .optional(["b"], "Bar", ArgType::Other("Barbar"))
             .required(["z", "baz"], "Baz")
-            .parse::<(bool, String, String, usize)>("a --baz 42".split(" ").map(String::from))
+            .parse::<(bool, String, String, usize)>("a --baz 42".split(' ').map(String::from))
             .unwrap_err()
         {
             Error::MissingRequired {
@@ -899,7 +897,7 @@ mod tests {
             .parse::<(bool, bool)>("a --baz".split(' ').map(String::from))
             .unwrap_err()
         {
-            Error::UndefinedKey(s) if s == "baz".to_owned() => {}
+            Error::UndefinedKey(s) if s == *"baz" => {}
             e => panic!(
                 "Expected {:?} got {:?}",
                 Error::UndefinedKey("baz".to_owned()),
