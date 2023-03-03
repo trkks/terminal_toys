@@ -60,12 +60,15 @@ impl fmt::Display for Error {
 
 impl error::Error for Error {}
 
+enum Arg {
+    Value,
+    Option,
+}
+
 /// Normalize/preprocess the CLI-syntax (most notably do "-bar" => "-b -a -r").
 ///
-/// Return `Option<(bool, String)>` in order to deal with argument positions
-/// later. The bool represents if the argument is an option, which needs to be
-/// added to the dict.
-fn normalize(args: impl Iterator<Item = String>) -> Vec<Option<(bool, String)>> {
+/// Return `Option`s in order to deal with argument positions later.
+fn normalize(args: impl Iterator<Item = String>) -> Vec<Option<(Arg, String)>> {
     args
         // Ignore the executable. TODO Allow saving exe with a .exe() -method?
         .skip(1)
@@ -75,10 +78,14 @@ fn normalize(args: impl Iterator<Item = String>) -> Vec<Option<(bool, String)>> 
             let n = key_prefix_len(&s);
             if n == 1 {
                 // Multi-character group.
-                acc.extend(s.chars().skip(1).map(|c| Some((true, c.to_string()))));
+                let s = s.chars().skip(1);
+                acc.extend(s.map(|c| Some((Arg::Option, c.to_string()))));
             } else {
                 // Also remove any other length prefixes starting with '-'.
-                acc.push(Some((n > 0, s.chars().skip(n).collect())));
+                let s = s.chars().skip(n).collect();
+                acc.push(Some(
+                    (if n > 0 { Arg::Option } else { Arg::Value }, s)
+                ));
             }
             acc
         })
@@ -100,9 +107,9 @@ fn key_prefix_len(s: &str) -> usize {
 
 /// Search list of args (which might be values denoted by `false`) for the first
 /// match of the given key. Return the index of found match.
-fn find_matching_idx(args: &mut [Option<(bool, String)>], key: &'static str) -> Option<usize> {
+fn find_matching_idx(args: &mut [Option<(Arg, String)>], key: &'static str) -> Option<usize> {
     args.iter_mut().enumerate().find_map(|(i, opt)| {
-        if let Some((true, arg)) = opt {
+        if let Some((Arg::Option, arg)) = opt {
             if arg == key {
                 return Some(i);
             }
@@ -311,7 +318,7 @@ impl Smargs {
     /// is a key or a value. This means, that some strings meant as values for
     /// example "--my-username--" will be presented as being keys. However for
     /// example "-42" is strictly considered a value.
-    fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(bool, String)>>) -> Result<(), Error> {
+    fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(Arg, String)>>) -> Result<(), Error> {
         // Check that all options in args are found in the builder-definition.
         {
             // TODO Holy references :o
@@ -320,12 +327,14 @@ impl Smargs {
                 .iter()
                 .flat_map(|x| x.keys.iter())
                 .collect();
-            for (is_option, value) in args
+            for arg in args
                 .iter()
                 .map(|x| x.as_ref().expect("bug: args constructed badly"))
             {
-                if *is_option && !all_keys.iter().any(|x| &x == &&value) {
-                    return Err(Error::UndefinedKey(value.clone()));
+                if let (Arg::Option, key) = arg {
+                    if !all_keys.iter().any(|x| &x == &&key) {
+                        return Err(Error::UndefinedKey(key.clone()));
+                    }
                 }
             }
         }
