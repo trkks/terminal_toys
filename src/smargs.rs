@@ -32,8 +32,11 @@ impl fmt::Display for Error {
             Self::MissingRequired { expected, count } => {
                 // TODO What about "required _at least_ of X" in case of (future)
                 // list-type arguments?
-                format!("Not enough arguments: required {}, got {}.", expected, count)
-            },
+                format!(
+                    "Not enough arguments: required {}, got {}.",
+                    expected, count
+                )
+            }
             // TODO Suggest similar existing arguments in case of user typo.
             Self::UndefinedKey(key) => format!("Option '{}' does not exist", key),
             Self::Smarg { argument, kind } => format!(
@@ -122,7 +125,9 @@ impl Display for Smarg {
             xs.sort();
             // Sort in reverse-length second.
             xs.sort_by(|x, y| x.len().cmp(&y.len()).reverse());
-            xs.iter().map(|x| format!("{}{} ", if x.len() == 1 { "-" } else { "--" }, x)).collect()
+            xs.iter()
+                .map(|x| format!("{}{} ", if x.len() == 1 { "-" } else { "--" }, x))
+                .collect()
         };
 
         let note = match &self.kind {
@@ -310,10 +315,18 @@ impl Smargs {
         // Check that all options in args are found in the builder-definition.
         {
             // TODO Holy references :o
-            let all_keys: Vec<&&'static str> = self.defins.iter().map(|x| x.keys.iter() ).flatten().collect();
-            for (is_option, value) in args.iter().map(|x| x.as_ref().expect("bug: args constructed badly")) {
+            let all_keys: Vec<&&'static str> = self
+                .defins
+                .iter()
+                .map(|x| x.keys.iter())
+                .flatten()
+                .collect();
+            for (is_option, value) in args
+                .iter()
+                .map(|x| x.as_ref().expect("bug: args constructed badly"))
+            {
                 if *is_option && all_keys.iter().find(|x| x == &&value).is_none() {
-                    return Err(Error::UndefinedKey(value.clone()))
+                    return Err(Error::UndefinedKey(value.clone()));
                 }
             }
         }
@@ -335,7 +348,7 @@ impl Smargs {
                     args.get_mut(key_idx + 1)
                         .ok_or(Error::Smarg {
                             argument: smarg.clone(),
-                            kind: ErrorKind::MissingValue
+                            kind: ErrorKind::MissingValue,
                         })?
                         .take()
                         .unwrap()
@@ -368,7 +381,12 @@ impl Smargs {
 
     /// Perform common operations for defining an argument in order
     /// and TODO: generate a user-friendly description for it.
-    fn push_arg<const N: usize>(&mut self, keys: [&'static str; N], description: &str, kind: SmargKind) {
+    fn push_arg<const N: usize>(
+        &mut self,
+        keys: [&'static str; N],
+        description: &str,
+        kind: SmargKind,
+    ) {
         // Check for duplicates keys in user definition TODO This could
         // theoretically be done at compile time...or probably a lot cleaner...
         if let Some((def, duplicate_key)) = self.defins.iter().find_map(|def| {
@@ -383,7 +401,10 @@ impl Smargs {
                 duplicate_key, def
             )
         } else {
-            self.defins.push(Smarg { keys: keys.to_vec(), kind });
+            self.defins.push(Smarg {
+                keys: keys.to_vec(),
+                kind,
+            });
         }
     }
 
@@ -607,7 +628,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{ArgType, Error, Smargs, ErrorKind};
+    use super::{ArgType, Error, ErrorKind, Smargs};
 
     #[test]
     fn general_use_case() {
@@ -823,7 +844,7 @@ mod tests {
             .parse::<(bool, bool)>(std::iter::empty())
             .unwrap_err()
         {
-            Error::Empty => {},
+            Error::Empty => {}
             e => panic!("Expected {:?} got {:?}", Error::Empty, e),
         }
     }
@@ -837,11 +858,14 @@ mod tests {
             .parse::<(String, usize, usize)>("a \"moth man\" -a 41 -d".split(" ").map(String::from))
             .unwrap_err()
         {
-            Error::Smarg { argument: _, kind: ErrorKind::MissingValue } => {},
+            Error::Smarg {
+                argument: _,
+                kind: ErrorKind::MissingValue,
+            } => {}
             e => panic!("Expected {:?} got {:?}", ErrorKind::MissingValue, e),
         }
     }
-    
+
     #[test]
     fn not_enough_required_args() {
         match Smargs::builder("Test program")
@@ -852,8 +876,18 @@ mod tests {
             .parse::<(bool, String, String, usize)>("a --baz 42".split(" ").map(String::from))
             .unwrap_err()
         {
-            Error::MissingRequired { expected: 2, count: 0 } => {},
-            e => panic!("Expected {:?} got {:?}", Error::MissingRequired { expected: 2, count: 0 }, e),
+            Error::MissingRequired {
+                expected: 2,
+                count: 0,
+            } => {}
+            e => panic!(
+                "Expected {:?} got {:?}",
+                Error::MissingRequired {
+                    expected: 2,
+                    count: 0
+                },
+                e
+            ),
         }
     }
 
@@ -865,8 +899,12 @@ mod tests {
             .parse::<(bool, bool)>("a --baz".split(' ').map(String::from))
             .unwrap_err()
         {
-            Error::UndefinedKey(s) if s == "baz".to_owned() => {},
-            e => panic!("Expected {:?} got {:?}", Error::UndefinedKey("baz".to_owned()), e),
+            Error::UndefinedKey(s) if s == "baz".to_owned() => {}
+            e => panic!(
+                "Expected {:?} got {:?}",
+                Error::UndefinedKey("baz".to_owned()),
+                e
+            ),
         }
     }
 }
