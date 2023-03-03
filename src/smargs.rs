@@ -18,6 +18,7 @@ pub enum ErrorKind {
 pub enum Error {
     Empty,
     MissingRequired { expected: usize, count: usize },
+    UndefinedKey(String),
     Smarg { argument: Smarg, kind: ErrorKind },
     // TODO Add a check and an error for non-defined arguments in args-input.
 }
@@ -32,7 +33,9 @@ impl fmt::Display for Error {
                 // TODO What about "required _at least_ of X" in case of (future)
                 // list-type arguments?
                 format!("Not enough arguments: required {}, got {}.", expected, count)
-            }
+            },
+            // TODO Suggest similar existing arguments in case of user typo.
+            Self::UndefinedKey(key) => format!("Option '{}' does not exist", key),
             Self::Smarg { argument, kind } => format!(
                 "{} Usage: {}",
                 match kind {
@@ -293,7 +296,8 @@ impl Smargs {
         T::try_from(self)
     }
 
-    /// Select the values for arguments based on identified keys.
+    /// Validate the keys based on definition and select the values for
+    /// arguments based on identified keys.
     ///
     /// Key-value pairs are roughly based on the rough syntax:
     /// > Key := -Alph Value | --Alph Value
@@ -303,6 +307,17 @@ impl Smargs {
     /// example "--my-username--" will be presented as being keys. However for
     /// example "-42" is strictly considered a value.
     fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(bool, String)>>) -> Result<(), Error> {
+        // Check that all options in args are found in the builder-definition.
+        {
+            // TODO Holy references :o
+            let all_keys: Vec<&&'static str> = self.defins.iter().map(|x| x.keys.iter() ).flatten().collect();
+            for (is_option, value) in args.iter().map(|x| x.as_ref().expect("bug: args constructed badly")) {
+                if *is_option && all_keys.iter().find(|x| x == &&value).is_none() {
+                    return Err(Error::UndefinedKey(value.clone()))
+                }
+            }
+        }
+
         self.values = Vec::with_capacity(self.defins.len());
 
         for smarg @ Smarg { keys, kind } in &self.defins {
@@ -839,6 +854,19 @@ mod tests {
         {
             Error::MissingRequired { expected: 2, count: 0 } => {},
             e => panic!("Expected {:?} got {:?}", Error::MissingRequired { expected: 2, count: 0 }, e),
+        }
+    }
+
+    #[test]
+    fn undefined_key_in_input() {
+        match Smargs::builder("Test program")
+            .optional(["foo"], "Foo", ArgType::False)
+            .optional(["bar"], "Bar", ArgType::False)
+            .parse::<(bool, bool)>("a --baz".split(' ').map(String::from))
+            .unwrap_err()
+        {
+            Error::UndefinedKey(s) if s == "baz".to_owned() => {},
+            e => panic!("Expected {:?} got {:?}", Error::UndefinedKey("baz".to_owned()), e),
         }
     }
 }
