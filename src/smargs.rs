@@ -20,7 +20,6 @@ pub enum Error {
     MissingRequired { expected: usize },
     UndefinedKey(String),
     Smarg { argument: Smarg, kind: ErrorKind },
-    // TODO Add a check and an error for non-defined arguments in args-input.
 }
 
 /// Offer nicer error-messages to user.
@@ -62,30 +61,77 @@ enum Arg {
     Option,
 }
 
-/// Normalize/preprocess the CLI-syntax (most notably do "-bar" => "-b -a -r").
-///
-/// Return `Option`s in order to deal with argument positions later.
-fn normalize(args: impl Iterator<Item = String>) -> Vec<Option<(Arg, String)>> {
-    args
-        // Ignore the executable. TODO Allow saving exe with a .exe() -method?
-        .skip(1)
+/// Prevent non-defined but option-seeming strings like '--kebab--' or negative
+/// numbers like '-42' from being interpreted as options and normalize the
+/// CLI-syntax (most notably do "-bar" => "-b -a -r", which is why this returns
+/// `Vec`).
+/// TODO Holy references :o
+/// TODO Why not utilize the definition at this point???
+/// TODOTODO Why not enforce these rules at definition-time???
+fn normalize(key_set: &[&&'static str], arg: String) -> Result<Vec<(Arg, String)>, Error> {
+    // Assume initially, that if the arg begins with '-' it is a key.
+    let normalized = {
         // Remove the cli-syntax off of keys and normalize the
         // multi-character groups.
-        .fold(Vec::new(), |mut acc, s| {
-            let n = key_prefix_len(&s);
+        let n = key_prefix_len(&arg);
             if n == 1 {
                 // Multi-character group.
-                let s = s.chars().skip(1);
-                acc.extend(s.map(|c| Some((Arg::Option, c.to_string()))));
+            let keys = arg.chars().skip(1);
+            keys.map(|c| (1, c.to_string())).collect()
             } else {
                 // Also remove any other length prefixes starting with '-'.
-                let s = s.chars().skip(n).collect();
-                acc.push(Some(
-                    (if n > 0 { Arg::Option } else { Arg::Value }, s)
-                ));
+            let s = arg.chars().skip(n).collect();
+            vec![(n, s)]
+        }
+    };
+
+    let defined = |key: &str| key_set.contains(&&key);
+
+    // Check that the assumed key(s) is defined and if not, it must be a value.
+    // FIXME multiples of a key need to be checked e.g. if 'x' is a
+    // key expecting value but input is "-x -x" this becomes
+    // [Option("x"), Option("x")] instead of [Option("x"), Value("x")]
+    // Handle by "popping" the keys as they are checkd?
+    match &normalized[..] {
+        // TODO Could probably be possible without the cloning(?) of string.
+        [(0, value)] => Ok(vec![(Arg::Value, value.to_owned())]),
+        [(n, key)] if *n > 1 => {
+            if defined(key) {
+                Ok(vec![(Arg::Option, key.to_owned())])
+            } else {
+                Err(Error::UndefinedKey(key.to_owned()))
             }
-            acc
-        })
+        },
+        multi_key => {
+            // Keep track of any keys being valid; if none of the keys in the
+            // group are defined, the group could actually be a value e.g. a
+            // stylized username "-myuser-" and is then interpreted as such.
+            let (none_defined, result) = {
+                let mut none_defined = true;
+                let mut result = Ok(Vec::<(Arg, String)>::new());
+                for (_, key) in multi_key {
+                    // Everything, right here, all at once.
+                    // The Result is the return value or first error found.
+                    if defined(key) {
+                        if let Ok(keys) = result.as_mut() {
+                            keys.push((Arg::Option, key.to_owned()));
+                            none_defined = false;
+                        }
+                    } else {
+                        result = Err(Error::UndefinedKey(key.to_owned()));
+                    }
+                }
+                (none_defined, result)
+            };
+
+            if none_defined {
+                // Return the value as is.
+                Ok(vec![(Arg::Value, arg)])
+            } else {
+                result
+            }
+        },
+    }
 }
 
 /// Return the amount of preceding '-'-characters or 0 if the first character of
@@ -276,18 +322,40 @@ impl Smargs {
 
     /// Parse the argument strings into the type `T` according to the
     /// definition of `self` which may include default values for some.
-    pub fn parse<T>(mut self, args: impl Iterator<Item = String>) -> Result<T, Error>
+    pub fn parse<T>(mut self, mut args: impl Iterator<Item = String>) -> Result<T, Error>
     where
         T: TryFrom<Smargs, Error = Error>,
     {
-        let mut args = normalize(args);
+        // Ignore the executable. TODO Allow saving exe with a .exe() -method?
+        // TODO Save it anyway for error/help messages?
+        args.next();
+
+        let mut args = {
+            // Check that the args can satisfy all definitions.
+
+            let all_keys: Vec<&&'static str> = self
+                .defins
+                .iter()
+                .flat_map(|x| x.keys.iter())
+                .collect();
+
+            let mut xs = Vec::<Option<(Arg, String)>>::new();
+            for arg in args {
+                xs.extend(
+                    // Wrap elements in Option for memory trickery.
+                    normalize(&all_keys, arg)?.into_iter().map(|x| Some(x))
+                );
+            }
+            xs
+        };
+
+        // Fill in matching values based on keys.
+        self.resolve_kv_pairs(&mut args)?;
 
         if args.is_empty() {
             return Err(Error::Empty);
         }
 
-        // Fill in matching values based on keys.
-        self.resolve_kv_pairs(&mut args)?;
 
         // Replace all the rest in order after the options (and optionals) are
         // filtered out.
@@ -316,26 +384,6 @@ impl Smargs {
     /// example "--my-username--" will be presented as being keys. However for
     /// example "-42" is strictly considered a value.
     fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(Arg, String)>>) -> Result<(), Error> {
-        // Check that all options in args are found in the builder-definition.
-        {
-            // TODO Holy references :o
-            let all_keys: Vec<&&'static str> = self
-                .defins
-                .iter()
-                .flat_map(|x| x.keys.iter())
-                .collect();
-            for arg in args
-                .iter()
-                .map(|x| x.as_ref().expect("bug: args constructed badly"))
-            {
-                if let (Arg::Option, key) = arg {
-                    if !all_keys.iter().any(|x| &x == &&key) {
-                        return Err(Error::UndefinedKey(key.clone()));
-                    }
-                }
-            }
-        }
-
         self.values = Vec::with_capacity(self.defins.len());
 
         for smarg @ Smarg { keys, kind } in &self.defins {
@@ -903,7 +951,7 @@ mod tests {
             .parse::<(bool, bool)>("a --baz".split(' ').map(String::from))
             .unwrap_err()
         {
-            Error::UndefinedKey(s) if s == *"baz" => {}
+            Error::UndefinedKey(s) if s == "baz" => {}
             e => panic!(
                 "Expected {:?} got {:?}",
                 Error::UndefinedKey("baz".to_owned()),
