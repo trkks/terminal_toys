@@ -1,4 +1,4 @@
-use terminal_toys::{smargs, ArgType, Smargs};
+use terminal_toys::{smargs::{self, SmargKind}, ArgType, Smargs};
 
 #[derive(Debug)]
 struct Input {
@@ -22,6 +22,7 @@ impl From<(bool, String, String, usize)> for Input {
 
 /// The same registration application example as seen in the documentation.
 fn main() -> Result<(), String> {
+    /*
     let builder = Smargs::builder("Register for service")
         .optional(
             ["no-newsletter"],
@@ -31,6 +32,21 @@ fn main() -> Result<(), String> {
         .required([], "Your full name")
         .optional(["d"], "Email address domain", ArgType::Other("getspam"))
         .required(["a", "age"], "Your age");
+*/
+    use terminal_toys::*;
+    let builder = || smargs!{
+        "Register for service",
+        (
+            vec!["f foo"],
+            SmargKind::Required,
+            ArgType::False
+        ),
+        (
+            vec!["f", "foo"],
+            SmargKind::Required,
+            ind: ArgType::False
+        )
+    };
 
     let mut newsletter_subscribers = vec![];
 
@@ -47,7 +63,7 @@ fn main() -> Result<(), String> {
     .map(String::from);
 
     let (no_news, name, domain, age): (bool, String, String, usize) =
-        match builder.clone().parse(std::env::args()) {
+        match builder().parse(std::env::args()) {
             empty_error @ Err(smargs::Error::Empty) => {
                 eprint!("You did not pass any arguments. Proceed with example ones [Y/n]?");
                 let mut buf = String::new();
@@ -56,7 +72,7 @@ fn main() -> Result<(), String> {
                         let s = buf.trim().to_lowercase();
                         let n = s.len();
                         if s.is_empty() || n <= 3 && "yes"[..n] == s[..n] {
-                            builder.parse(example_args)
+                            builder().parse(example_args)
                         } else {
                             empty_error
                         }

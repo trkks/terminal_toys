@@ -5,6 +5,74 @@ use std::fmt::Display;
 use std::iter;
 use std::str::FromStr;
 
+impl Smargs {
+    /// Initialize an empty `Smargs` struct.
+    ///
+    /// `description` is the general description of the program.
+    pub fn new(_description: &str) -> Self {
+        Self {
+            defins: Vec::new(),
+            values: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, smarg: Smarg) {
+        Self::validate_format(&smarg.keys);
+
+        let earlier_keys: Vec<&&'static str> = self
+            .defins
+            .iter()
+            .flat_map(|x| x.keys.iter())
+            .collect();
+        for key in earlier_keys {
+            if smarg.keys.contains(key) {
+                panic!("Duplicate key defined '{}'", key);
+            }
+        }
+
+        self.defins.push(smarg);
+    }
+
+    pub fn parse<T>(mut self, mut args: impl Iterator<Item = String>) -> Result<T, Error>
+    where
+        T: TryFrom<Smargs, Error = Error>,
+    {
+        todo!()
+    }
+
+    fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: error::Error + 'static,
+    {
+        todo!()
+    }
+
+    fn validate_format(keys: &[&'static str]) {
+        for key in keys {
+            if key.contains(' ') {
+                panic!("A key must not contain spaces: '{}'", key);
+            }
+            // TODO: Check prefix.
+            // TODO: Check characters used after prefix.
+        }
+    }
+}
+
+
+#[macro_export]
+macro_rules! smargs {
+    ( $( desc:literal )?, $( $keys:expr, $case:literal, $kind:literal ),+ ) => {
+        {
+            let mut smargs = Smargs::new($desc);
+            $(
+                smargs.push(Smarg { keys: $keys, case $case, kind: $kind });
+            )*
+            smargs
+        }
+    };
+}
+
 /// More elaborative explanation for an error.
 #[derive(Debug)]
 pub enum ErrorKind {
@@ -161,10 +229,11 @@ fn find_matching_idx(args: &mut [Option<(Arg, String)>], key: &'static str) -> O
     })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Smarg {
-    keys: Vec<&'static str>,
-    kind: SmargKind,
+    pub keys: Vec<&'static str>,
+    pub case: SmargKind,
+    pub kind: ArgType,
 }
 
 impl Display for Smarg {
@@ -180,7 +249,7 @@ impl Display for Smarg {
                 .collect()
         };
 
-        let note = match &self.kind {
+        let note = match &self.case {
             SmargKind::Required => "<required value>".to_owned(),
             SmargKind::Optional(default) => format!("<value OR '{}'>", default),
             SmargKind::Flag => "Negated by default".to_owned(),
@@ -201,9 +270,10 @@ pub enum SmargKind {
 
 /// Specifies if an argument is a flag.
 /// TODO Would just plain ol' Optional be adequate?
-pub enum ArgType<'a> {
+#[derive(Debug)]
+pub enum ArgType {
     False,
-    Other(&'a str),
+    Other(String),
 }
 
 /// SiMpler thAn wRiting it once aGain Surely :)
@@ -276,13 +346,14 @@ pub enum ArgType<'a> {
 /// assert_eq!(domain, "getspam".to_string());
 /// assert_eq!(age, 26);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Smargs {
     defins: Vec<Smarg>,
     values: Vec<Option<String>>,
 }
 
 impl Smargs {
+    /*
     /// Start a builder defining the order, keys and description of a program
     /// and its arguments.
     ///
@@ -386,14 +457,14 @@ impl Smargs {
     fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(Arg, String)>>) -> Result<(), Error> {
         self.values = Vec::with_capacity(self.defins.len());
 
-        for smarg @ Smarg { keys, kind } in &self.defins {
+        for smarg @ Smarg { keys, case, kind } in &self.defins {
             let opt = keys.iter().find_map(|x| find_matching_idx(args, x));
 
             // TODO Somehow despookify this if?
             let item = if let Some(key_idx) = opt {
                 // Remove the now unneeded key.
                 args[key_idx] = None;
-                Some(if let SmargKind::Flag = kind {
+                Some(if let SmargKind::Flag = case {
                     true.to_string()
                 } else {
                     // Check existence of and take the subsequent, key-matching,
@@ -455,7 +526,7 @@ impl Smargs {
         } else {
             self.defins.push(Smarg {
                 keys: keys.to_vec(),
-                kind,
+                case: kind,
             });
         }
     }
@@ -480,7 +551,7 @@ impl Smargs {
                 expected: self
                     .defins
                     .iter()
-                    .filter(|x| matches!(x, Smarg { kind: SmargKind::Required, ..}))
+                    .filter(|x| matches!(x, Smarg { case: SmargKind::Required, ..}))
                     .count()
             })?;
 
@@ -491,6 +562,7 @@ impl Smargs {
                 kind: ErrorKind::Parsing(std::any::type_name::<T>(), value, Box::new(e)),
             })
     }
+    */
 }
 
 impl<T1, T2> TryFrom<Smargs> for (T1, T2)
@@ -665,6 +737,7 @@ where
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::{ArgType, Error, ErrorKind, Smargs};
@@ -960,3 +1033,5 @@ mod tests {
         }
     }
 }
+
+*/
