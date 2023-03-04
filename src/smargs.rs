@@ -17,7 +17,7 @@ pub enum ErrorKind {
 #[derive(Debug)]
 pub enum Error {
     Empty,
-    MissingRequired { expected: usize, count: usize },
+    MissingRequired { expected: usize },
     UndefinedKey(String),
     Smarg { argument: Smarg, kind: ErrorKind },
     // TODO Add a check and an error for non-defined arguments in args-input.
@@ -29,13 +29,10 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
             Self::Empty => String::from("No arguments found."),
-            Self::MissingRequired { expected, count } => {
+            Self::MissingRequired { expected } => {
                 // TODO What about "required _at least_ of X" in case of (future)
                 // list-type arguments?
-                format!(
-                    "Not enough arguments: required {}, got {}.",
-                    expected, count
-                )
+                format!("Not enough arguments (expected {}).", expected)
             }
             // TODO Suggest similar existing arguments in case of user typo.
             Self::UndefinedKey(key) => format!("Option '{}' does not exist", key),
@@ -431,25 +428,12 @@ impl Smargs {
                 )
             })
             .take()
-            .ok_or_else(|| {
-                let required_count = self
+            .ok_or(Error::MissingRequired {
+                expected: self
                     .defins
                     .iter()
-                    .filter(|x| matches!(x.kind, SmargKind::Required))
-                    .count();
-                // FIXME Subtract underflow because required args can be defined
-                // after optionals e.g.
-                //   definition [opt("foo"), req, req] # (required_count == 2)
-                // with
-                //   input ["bar"]
-                // results in
-                //   index [     0,     1,    2 ]
-                //   value [ "foo", "bar", NONE ]
-                // thus 2 - (2 + 1) = 2 - 3 = -1_usize => panic
-                Error::MissingRequired {
-                    expected: required_count,
-                    count: required_count - (index + 1),
-                }
+                    .filter(|x| matches!(x, Smarg { kind: SmargKind::Required, ..}))
+                    .count()
             })?;
 
         value
@@ -874,7 +858,7 @@ mod tests {
     }
 
     #[test]
-    fn not_enough_required_args() {
+    fn not_enough_required_args_option() {
         match Smargs::builder("Test program")
             .optional(["foo"], "Foo", ArgType::False)
             .required([], "A required arg")
@@ -883,16 +867,29 @@ mod tests {
             .parse::<(bool, String, String, usize)>("a --baz 42".split(' ').map(String::from))
             .unwrap_err()
         {
-            Error::MissingRequired {
-                expected: 2,
-                count: 0,
-            } => {}
+            Error::MissingRequired { expected: 2 } => {}
             e => panic!(
                 "Expected {:?} got {:?}",
-                Error::MissingRequired {
-                    expected: 2,
-                    count: 0
-                },
+                Error::MissingRequired { expected: 2 },
+                e
+            ),
+        }
+    }
+
+    #[test]
+    fn not_enough_required_args_position() {
+        match Smargs::builder("Test program")
+            .optional(["foo"], "Foo", ArgType::False)
+            .required([], "A required arg")
+            .optional(["b"], "Bar", ArgType::Other("Barbar"))
+            .required(["z", "baz"], "Baz")
+            .parse::<(bool, String, String, usize)>("a Required".split(' ').map(String::from))
+            .unwrap_err()
+        {
+            Error::MissingRequired { expected: 2 } => {}
+            e => panic!(
+                "Expected {:?} got {:?}",
+                Error::MissingRequired { expected: 2 },
                 e
             ),
         }
