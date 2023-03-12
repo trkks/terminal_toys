@@ -347,57 +347,6 @@ impl Smargs {
 }
 
 
-#[macro_export]
-macro_rules! smargs {
-    ( 
-        $program_desc:literal, $( 
-            (
-                $arg_desc:literal
-                , $keys:expr
-                , $type_:ty
-                , $default:expr
-            )
-        ),+
-    ) => {
-        {
-            use std::any;
-            use crate::smargs;
-            let mut smargs = smargs::Smargs::new($program_desc);
-            $(
-                {
-                    let keys = $keys;
-                    //let mut default = Option::<&'static str>::None;
-                    let mut kind = None;
-
-                    // Select kind based on passed type.
-                    // TODO Check that default is of type type_?
-                    kind = Some(
-                        if let Some(value) = $default {
-                            let default = stringify!(value);
-                            smargs::SmargKind::Optional(default)
-                        } else {
-                            // Check for bool _after_ to allow user to realize
-                            // their own stupid mistakes about defaulting a flag
-                            // to true.
-                            // TODO: Prevent setting bool to true entirely?
-                            if any::TypeId::of::<$type_>() == any::TypeId::of::<bool>() {
-                                smargs::SmargKind::Flag
-                            } else {
-                                smargs::SmargKind::Required
-                            }
-                        }
-                    );
-
-                    let kind = kind.expect("argument definition missing the type or default value");
-
-                    smargs.push(smargs::Smarg { desc: $arg_desc, kind, keys });
-                }
-            )+
-            smargs
-        }
-    };
-}
-
 /// More elaborative explanation for an error.
 #[derive(Debug)]
 pub enum ErrorKind {
