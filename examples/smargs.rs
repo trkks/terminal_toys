@@ -1,4 +1,4 @@
-use terminal_toys::{smargs::{self, SmargKind}, ArgType, Smargs};
+use terminal_toys::smargs;
 
 #[derive(Debug)]
 struct Input {
@@ -22,31 +22,15 @@ impl From<(bool, String, String, usize)> for Input {
 
 /// The same registration application example as seen in the documentation.
 fn main() -> Result<(), String> {
-    /*
-    let builder = Smargs::builder("Register for service")
-        .optional(
-            ["no-newsletter"],
-            "Opt-out from receiving newsletter",
-            ArgType::False,
-        )
-        .required([], "Your full name")
-        .optional(["d"], "Email address domain", ArgType::Other("getspam"))
-        .required(["a", "age"], "Your age");
-*/
     use terminal_toys::*;
-    let builder = || smargs!{
+
+    let builder = || smargs!(
         "Register for service",
-        (
-            vec!["f foo"],
-            SmargKind::Required,
-            ArgType::False
-        ),
-        (
-            vec!["f", "foo"],
-            SmargKind::Required,
-            ind: ArgType::False
-        )
-    };
+        ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool, Option::<bool>::None),
+        ("Your full name", vec![], String, Option::<String>::None),
+        ("Email address domain", vec!["d"], String, Some("getspam".to_owned())),
+        ("Your age", vec!["a", "age"], usize, Option::<usize>::None)
+    );
 
     let mut newsletter_subscribers = vec![];
 
