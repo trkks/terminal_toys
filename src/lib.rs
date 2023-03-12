@@ -202,27 +202,30 @@ macro_rules! smargs {
                     let keys = $keys;
                     let mut default = Option::<&'static str>::None;
                     let mut kind = None;
+                    
+                    let arg_is_bool = any::TypeId::of::<$type_>() == any::TypeId::of::<bool>();
 
                     $(
+                        // Prevent using default on a bool entirely (Note that
+                        // this is a runtime check).
+                        if arg_is_bool {
+                            panic!("boolean argument defaults only to \"false\" and must do so automatically (remove \"{}\").", $default);
+                        }
                         default = Some($default);
                     )?
 
                     // Select kind based on passed type.
-                    // TODO Check that default is of type type_?
                     kind = Some(
-                        if let Some(value) = default {
+                        if arg_is_bool {
+                            // Booleans default to false in any case.
+                            smargs::SmargKind::Flag
+                        } else if let Some(value) = default {
                             let default = value.to_owned();
+                            // TODO Check that default is of type type_ e.g. by
+                            // trying to parse it here?
                             smargs::SmargKind::Optional(value)
                         } else {
-                            // Check for bool _after_ to allow user to realize
-                            // their own stupid mistakes about defaulting a flag
-                            // to true.
-                            // TODO: Prevent setting bool to true entirely?
-                            if any::TypeId::of::<$type_>() == any::TypeId::of::<bool>() {
-                                smargs::SmargKind::Flag
-                            } else {
-                                smargs::SmargKind::Required
-                            }
+                            smargs::SmargKind::Required
                         }
                     );
 
