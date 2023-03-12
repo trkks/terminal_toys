@@ -7,7 +7,294 @@ use std::iter;
 use std::str::FromStr;
 
 
+/// SiMpler thAn wRiting it once aGain Surely :)
+///
+/// # Examples:
+/// Program arguments will be defined using the builder:
+/// ```
+/// use terminal_toys::{Smargs, ArgType};
+///
+/// let builder = Smargs::builder("Register for service")
+///     .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
+///     .required([],                "Your full name")
+///     .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
+///     .required(["a", "age"],      "Your age");
+/// ```
+/// The different arguments will be recognized from the command line syntax and
+/// parsed into usable types:
+/// ```
+/// # fn main() -> Result<(), String> {
+/// # use terminal_toys::{Smargs, ArgType};
+/// # let builder = Smargs::builder("Register for service")
+/// #    .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
+/// #    .required([],                "Your full name")
+/// #    .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
+/// #    .required(["a", "age"],      "Your age");
+/// # let mut newsletter_subscribers = vec![];
+/// let args = vec!["register.exe", "--no-newsletter", "-a", "26", "-d", "hatch", "Matt Myman"].into_iter().map(String::from);
+///
+/// let (no_news, name, domain, age)
+///     : (bool, String, String, usize)
+///     = builder.parse(args).map_err(|e| e.to_string())?;
+///
+/// if age < 18 {
+///     let ys = 18 - age;
+///     let putdown = format!(
+///         "come back in {}",
+///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
+///     );
+///     eprintln!("Failed to register: {}", putdown);
+///     std::process::exit(1);
+/// }
+///
+/// let user_email = format!("{}.{}@{}.com", name, age, domain).replace(' ', ".").to_lowercase();
+///
+/// let subscriber_count = newsletter_subscribers.len();
+/// if !no_news {
+///     newsletter_subscribers.push(&user_email);
+/// }
+///
+/// assert_eq!(user_email, "matt.myman.26@hatch.com".to_string());
+/// assert_eq!(newsletter_subscribers.len(), subscriber_count);
+/// # Ok(()) }
+/// ```
+/// Required arguments can also be passed based on position defined by the
+/// calling order of the builder-methods. Missing but optional arguments use the
+/// given default value.
+/// ```
+/// # use terminal_toys::{Smargs, ArgType};
+/// # let builder = Smargs::builder("Register for service")
+/// #    .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
+/// #    .required([],                "Your full name")
+/// #    .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
+/// #    .required(["a", "age"],      "Your age");
+/// let args = vec!["register.exe", "Matt Myman", "26"].into_iter().map(String::from);
+///
+/// let (no_news, name, domain, age) : (bool, String, String, usize) = builder.parse(args).unwrap();
+///
+/// assert!(!no_news);
+/// assert_eq!(name, "Matt Myman".to_string());
+/// assert_eq!(domain, "getspam".to_string());
+/// assert_eq!(age, 26);
+/// ```
+#[derive(Debug)]
+pub struct Smargs {
+    defins: Vec<Smarg>,
+    values: Vec<Option<String>>,
+}
+
 impl Smargs {
+    /*
+    /// Start a builder defining the order, keys and description of a program
+    /// and its arguments.
+    ///
+    /// `description` is the general description of the program.
+    pub fn builder(_description: &str) -> Self {
+        Self {
+            defins: Vec::new(),
+            values: Vec::new(),
+        }
+    }
+
+    /// Define next an argument which __needs__ to be provided by the user.
+    pub fn required<const N: usize>(mut self, keys: [&'static str; N], description: &str) -> Self {
+        self.push_arg(keys, description, SmargKind::Required);
+        self
+    }
+
+    /// Define next an argument with a default value that will be used if
+    /// nothing is provided by the user.
+    ///
+    /// A boolean argument defaults to FALSE because using a flag essentially
+    /// means signaling the event of or __turning on__ something, certainly not
+    /// the contrary.
+    pub fn optional<const N: usize>(
+        mut self,
+        keys: [&'static str; N],
+        description: &str,
+        default: ArgType,
+    ) -> Self {
+        let kind = match default {
+            ArgType::False => SmargKind::Flag,
+            ArgType::Other(s) => SmargKind::Optional(s.to_owned()),
+        };
+        self.push_arg(keys, description, kind);
+        self
+    }
+
+    /// Parse the argument strings into the type `T` according to the
+    /// definition of `self` which may include default values for some.
+    pub fn parse<T>(mut self, mut args: impl Iterator<Item = String>) -> Result<T, Error>
+    where
+        T: TryFrom<Smargs, Error = Error>,
+    {
+        // Ignore the executable. TODO Allow saving exe with a .exe() -method?
+        // TODO Save it anyway for error/help messages?
+        args.next();
+
+        let mut args = {
+            // Check that the args can satisfy all definitions.
+
+            let all_keys: Vec<&&'static str> = self
+                .defins
+                .iter()
+                .flat_map(|x| x.keys.iter())
+                .collect();
+
+            let mut xs = Vec::<Option<(Arg, String)>>::new();
+            for arg in args {
+                xs.extend(
+                    // Wrap elements in Option for memory trickery.
+                    normalize(&all_keys, arg)?.into_iter().map(|x| Some(x))
+                );
+            }
+            xs
+        };
+
+        // Fill in matching values based on keys.
+        self.resolve_kv_pairs(&mut args)?;
+
+        if args.is_empty() {
+            return Err(Error::Empty);
+        }
+
+
+        // Replace all the rest in order after the options (and optionals) are
+        // filtered out.
+        for (x, y) in iter::zip(
+            self.values.iter_mut().filter(|x| x.is_none()),
+            args.iter_mut().filter(|x| x.is_some()),
+        ) {
+            x.replace(y.take().unwrap().1);
+        }
+
+        // TODO Instead of parsing into the values here, maybe return some
+        // abstraction like "IntermediateElemT_i" or "FakeT_i" (or perhaps
+        // `std::any::Any`?) that could be used to identify the boolean at
+        // runtime(?) (and thus get rid of ArgType::False).
+        T::try_from(self)
+    }
+
+    /// Validate the keys based on definition and select the values for
+    /// arguments based on identified keys.
+    ///
+    /// Key-value pairs are roughly based on the rough syntax:
+    /// > Key := -Alph Value | --Alph Value
+    ///
+    /// Value is a superset of Alph, which means is not always clear when a string
+    /// is a key or a value. This means, that some strings meant as values for
+    /// example "--my-username--" will be presented as being keys. However for
+    /// example "-42" is strictly considered a value.
+    fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(Arg, String)>>) -> Result<(), Error> {
+        self.values = Vec::with_capacity(self.defins.len());
+
+        for smarg @ Smarg { keys, case, kind } in &self.defins {
+            let opt = keys.iter().find_map(|x| find_matching_idx(args, x));
+
+            // TODO Somehow despookify this if?
+            let item = if let Some(key_idx) = opt {
+                // Remove the now unneeded key.
+                args[key_idx] = None;
+                Some(if let SmargKind::Flag = case {
+                    true.to_string()
+                } else {
+                    // Check existence of and take the subsequent, key-matching,
+                    // value.
+                    args.get_mut(key_idx + 1)
+                        .ok_or(Error::Smarg {
+                            argument: smarg.clone(),
+                            kind: ErrorKind::MissingValue,
+                        })?
+                        .take()
+                        .unwrap()
+                        .1
+                })
+            } else {
+                // Handle the case when a match is not found for the key.
+                match kind {
+                    // Flag defaults to false here.
+                    SmargKind::Flag => Some(false.to_string()),
+                    // Optional is replaced by its specified default.
+                    SmargKind::Optional(default) => Some(default.clone()),
+                    // Required will need to be found based on its position.
+                    SmargKind::Required => None,
+                }
+            };
+
+            self.values.push(item);
+        }
+        Ok(())
+    }
+
+    /// Creates `T` based on a call to `std::env::args`.
+    pub fn from_env<T>(self) -> Result<T, Error>
+    where
+        T: TryFrom<Smargs, Error = Error>,
+    {
+        self.parse(std::env::args())
+    }
+
+    /// Perform common operations for defining an argument in order
+    /// and TODO: generate a user-friendly description for it.
+    fn push_arg<const N: usize>(
+        &mut self,
+        keys: [&'static str; N],
+        description: &str,
+        kind: SmargKind,
+    ) {
+        // Check for duplicates keys in user definition TODO This could
+        // theoretically be done at compile time...or probably a lot cleaner...
+        if let Some((def, duplicate_key)) = self.defins.iter().find_map(|def| {
+            def.keys.iter().find_map(|x| {
+                keys.iter()
+                    .position(|y| y == x).map(|i| (def, keys[i]))
+            })
+        }) {
+            panic!(
+                "Duplicate key '{}' found in arguments' definition: {:?}",
+                duplicate_key, def
+            )
+        } else {
+            self.defins.push(Smarg {
+                keys: keys.to_vec(),
+                case: kind,
+            });
+        }
+    }
+
+    fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
+    where
+        T: FromStr,
+        <T as FromStr>::Err: error::Error + 'static,
+    {
+        // TODO This seems unnecessarily complex...
+        let value = self
+            .values
+            .get_mut(index)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Smargs.values constructed incorrectly: None in index {}",
+                    index
+                )
+            })
+            .take()
+            .ok_or(Error::MissingRequired {
+                expected: self
+                    .defins
+                    .iter()
+                    .filter(|x| matches!(x, Smarg { case: SmargKind::Required, ..}))
+                    .count()
+            })?;
+
+        value
+            .parse()
+            .map_err(|e: <T as FromStr>::Err| Error::Smarg {
+                argument: self.defins[index].clone(),
+                kind: ErrorKind::Parsing(std::any::type_name::<T>(), value, Box::new(e)),
+            })
+    }
+    */
+
     /// Initialize an empty `Smargs` struct.
     ///
     /// `description` is the general description of the program.
@@ -319,294 +606,6 @@ pub enum ArgType {
     Other(String),
 }
 
-/// SiMpler thAn wRiting it once aGain Surely :)
-///
-/// # Examples:
-/// Program arguments will be defined using the builder:
-/// ```
-/// use terminal_toys::{Smargs, ArgType};
-///
-/// let builder = Smargs::builder("Register for service")
-///     .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
-///     .required([],                "Your full name")
-///     .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
-///     .required(["a", "age"],      "Your age");
-/// ```
-/// The different arguments will be recognized from the command line syntax and
-/// parsed into usable types:
-/// ```
-/// # fn main() -> Result<(), String> {
-/// # use terminal_toys::{Smargs, ArgType};
-/// # let builder = Smargs::builder("Register for service")
-/// #    .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
-/// #    .required([],                "Your full name")
-/// #    .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
-/// #    .required(["a", "age"],      "Your age");
-/// # let mut newsletter_subscribers = vec![];
-/// let args = vec!["register.exe", "--no-newsletter", "-a", "26", "-d", "hatch", "Matt Myman"].into_iter().map(String::from);
-///
-/// let (no_news, name, domain, age)
-///     : (bool, String, String, usize)
-///     = builder.parse(args).map_err(|e| e.to_string())?;
-///
-/// if age < 18 {
-///     let ys = 18 - age;
-///     let putdown = format!(
-///         "come back in {}",
-///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
-///     );
-///     eprintln!("Failed to register: {}", putdown);
-///     std::process::exit(1);
-/// }
-///
-/// let user_email = format!("{}.{}@{}.com", name, age, domain).replace(' ', ".").to_lowercase();
-///
-/// let subscriber_count = newsletter_subscribers.len();
-/// if !no_news {
-///     newsletter_subscribers.push(&user_email);
-/// }
-///
-/// assert_eq!(user_email, "matt.myman.26@hatch.com".to_string());
-/// assert_eq!(newsletter_subscribers.len(), subscriber_count);
-/// # Ok(()) }
-/// ```
-/// Required arguments can also be passed based on position defined by the
-/// calling order of the builder-methods. Missing but optional arguments use the
-/// given default value.
-/// ```
-/// # use terminal_toys::{Smargs, ArgType};
-/// # let builder = Smargs::builder("Register for service")
-/// #    .optional(["no-newsletter"], "Opt-out from receiving newsletter", ArgType::False)
-/// #    .required([],                "Your full name")
-/// #    .optional(["d"],             "Email address domain", ArgType::Other("getspam"))
-/// #    .required(["a", "age"],      "Your age");
-/// let args = vec!["register.exe", "Matt Myman", "26"].into_iter().map(String::from);
-///
-/// let (no_news, name, domain, age) : (bool, String, String, usize) = builder.parse(args).unwrap();
-///
-/// assert!(!no_news);
-/// assert_eq!(name, "Matt Myman".to_string());
-/// assert_eq!(domain, "getspam".to_string());
-/// assert_eq!(age, 26);
-/// ```
-#[derive(Debug)]
-pub struct Smargs {
-    defins: Vec<Smarg>,
-    values: Vec<Option<String>>,
-}
-
-impl Smargs {
-    /*
-    /// Start a builder defining the order, keys and description of a program
-    /// and its arguments.
-    ///
-    /// `description` is the general description of the program.
-    pub fn builder(_description: &str) -> Self {
-        Self {
-            defins: Vec::new(),
-            values: Vec::new(),
-        }
-    }
-
-    /// Define next an argument which __needs__ to be provided by the user.
-    pub fn required<const N: usize>(mut self, keys: [&'static str; N], description: &str) -> Self {
-        self.push_arg(keys, description, SmargKind::Required);
-        self
-    }
-
-    /// Define next an argument with a default value that will be used if
-    /// nothing is provided by the user.
-    ///
-    /// A boolean argument defaults to FALSE because using a flag essentially
-    /// means signaling the event of or __turning on__ something, certainly not
-    /// the contrary.
-    pub fn optional<const N: usize>(
-        mut self,
-        keys: [&'static str; N],
-        description: &str,
-        default: ArgType,
-    ) -> Self {
-        let kind = match default {
-            ArgType::False => SmargKind::Flag,
-            ArgType::Other(s) => SmargKind::Optional(s.to_owned()),
-        };
-        self.push_arg(keys, description, kind);
-        self
-    }
-
-    /// Parse the argument strings into the type `T` according to the
-    /// definition of `self` which may include default values for some.
-    pub fn parse<T>(mut self, mut args: impl Iterator<Item = String>) -> Result<T, Error>
-    where
-        T: TryFrom<Smargs, Error = Error>,
-    {
-        // Ignore the executable. TODO Allow saving exe with a .exe() -method?
-        // TODO Save it anyway for error/help messages?
-        args.next();
-
-        let mut args = {
-            // Check that the args can satisfy all definitions.
-
-            let all_keys: Vec<&&'static str> = self
-                .defins
-                .iter()
-                .flat_map(|x| x.keys.iter())
-                .collect();
-
-            let mut xs = Vec::<Option<(Arg, String)>>::new();
-            for arg in args {
-                xs.extend(
-                    // Wrap elements in Option for memory trickery.
-                    normalize(&all_keys, arg)?.into_iter().map(|x| Some(x))
-                );
-            }
-            xs
-        };
-
-        // Fill in matching values based on keys.
-        self.resolve_kv_pairs(&mut args)?;
-
-        if args.is_empty() {
-            return Err(Error::Empty);
-        }
-
-
-        // Replace all the rest in order after the options (and optionals) are
-        // filtered out.
-        for (x, y) in iter::zip(
-            self.values.iter_mut().filter(|x| x.is_none()),
-            args.iter_mut().filter(|x| x.is_some()),
-        ) {
-            x.replace(y.take().unwrap().1);
-        }
-
-        // TODO Instead of parsing into the values here, maybe return some
-        // abstraction like "IntermediateElemT_i" or "FakeT_i" (or perhaps
-        // `std::any::Any`?) that could be used to identify the boolean at
-        // runtime(?) (and thus get rid of ArgType::False).
-        T::try_from(self)
-    }
-
-    /// Validate the keys based on definition and select the values for
-    /// arguments based on identified keys.
-    ///
-    /// Key-value pairs are roughly based on the rough syntax:
-    /// > Key := -Alph Value | --Alph Value
-    ///
-    /// Value is a superset of Alph, which means is not always clear when a string
-    /// is a key or a value. This means, that some strings meant as values for
-    /// example "--my-username--" will be presented as being keys. However for
-    /// example "-42" is strictly considered a value.
-    fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(Arg, String)>>) -> Result<(), Error> {
-        self.values = Vec::with_capacity(self.defins.len());
-
-        for smarg @ Smarg { keys, case, kind } in &self.defins {
-            let opt = keys.iter().find_map(|x| find_matching_idx(args, x));
-
-            // TODO Somehow despookify this if?
-            let item = if let Some(key_idx) = opt {
-                // Remove the now unneeded key.
-                args[key_idx] = None;
-                Some(if let SmargKind::Flag = case {
-                    true.to_string()
-                } else {
-                    // Check existence of and take the subsequent, key-matching,
-                    // value.
-                    args.get_mut(key_idx + 1)
-                        .ok_or(Error::Smarg {
-                            argument: smarg.clone(),
-                            kind: ErrorKind::MissingValue,
-                        })?
-                        .take()
-                        .unwrap()
-                        .1
-                })
-            } else {
-                // Handle the case when a match is not found for the key.
-                match kind {
-                    // Flag defaults to false here.
-                    SmargKind::Flag => Some(false.to_string()),
-                    // Optional is replaced by its specified default.
-                    SmargKind::Optional(default) => Some(default.clone()),
-                    // Required will need to be found based on its position.
-                    SmargKind::Required => None,
-                }
-            };
-
-            self.values.push(item);
-        }
-        Ok(())
-    }
-
-    /// Creates `T` based on a call to `std::env::args`.
-    pub fn from_env<T>(self) -> Result<T, Error>
-    where
-        T: TryFrom<Smargs, Error = Error>,
-    {
-        self.parse(std::env::args())
-    }
-
-    /// Perform common operations for defining an argument in order
-    /// and TODO: generate a user-friendly description for it.
-    fn push_arg<const N: usize>(
-        &mut self,
-        keys: [&'static str; N],
-        description: &str,
-        kind: SmargKind,
-    ) {
-        // Check for duplicates keys in user definition TODO This could
-        // theoretically be done at compile time...or probably a lot cleaner...
-        if let Some((def, duplicate_key)) = self.defins.iter().find_map(|def| {
-            def.keys.iter().find_map(|x| {
-                keys.iter()
-                    .position(|y| y == x).map(|i| (def, keys[i]))
-            })
-        }) {
-            panic!(
-                "Duplicate key '{}' found in arguments' definition: {:?}",
-                duplicate_key, def
-            )
-        } else {
-            self.defins.push(Smarg {
-                keys: keys.to_vec(),
-                case: kind,
-            });
-        }
-    }
-
-    fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
-    where
-        T: FromStr,
-        <T as FromStr>::Err: error::Error + 'static,
-    {
-        // TODO This seems unnecessarily complex...
-        let value = self
-            .values
-            .get_mut(index)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Smargs.values constructed incorrectly: None in index {}",
-                    index
-                )
-            })
-            .take()
-            .ok_or(Error::MissingRequired {
-                expected: self
-                    .defins
-                    .iter()
-                    .filter(|x| matches!(x, Smarg { case: SmargKind::Required, ..}))
-                    .count()
-            })?;
-
-        value
-            .parse()
-            .map_err(|e: <T as FromStr>::Err| Error::Smarg {
-                argument: self.defins[index].clone(),
-                kind: ErrorKind::Parsing(std::any::type_name::<T>(), value, Box::new(e)),
-            })
-    }
-    */
-}
 
 impl<T1, T2> TryFrom<Smargs> for (T1, T2)
 where
