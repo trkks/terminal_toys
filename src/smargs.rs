@@ -1,9 +1,11 @@
+use std::any;
 use std::convert::TryFrom;
 use std::error;
 use std::fmt;
 use std::fmt::Display;
 use std::iter;
 use std::str::FromStr;
+
 
 impl Smargs {
     /// Initialize an empty `Smargs` struct.
@@ -33,9 +35,7 @@ impl Smargs {
         self.defins.push(smarg);
     }
 
-    pub fn parse<T>(mut self, mut args: impl Iterator<Item = String>) -> Result<T, Error>
-    where
-        T: TryFrom<Smargs, Error = Error>,
+    pub fn parse<Ts>(mut self, mut args: impl Iterator<Item = String>) -> Result<Ts, Error>
     {
         todo!()
     }
@@ -62,12 +62,50 @@ impl Smargs {
 
 #[macro_export]
 macro_rules! smargs {
-    ( $( desc:literal )?, $( $keys:expr, $case:literal, $kind:literal ),+ ) => {
+    ( 
+        $program_desc:literal, $( 
+            (
+                $arg_desc:literal
+                , $keys:expr
+                , $type_:ty
+                , $default:expr
+            )
+        ),+
+    ) => {
         {
-            let mut smargs = Smargs::new($desc);
+            use std::any;
+            use crate::smargs;
+            let mut smargs = smargs::Smargs::new($program_desc);
             $(
-                smargs.push(Smarg { keys: $keys, case $case, kind: $kind });
-            )*
+                {
+                    let keys = $keys;
+                    //let mut default = Option::<&'static str>::None;
+                    let mut kind = None;
+
+                    // Select kind based on passed type.
+                    // TODO Check that default is of type type_?
+                    kind = Some(
+                        if let Some(value) = $default {
+                            let default = stringify!(value);
+                            smargs::SmargKind::Optional(default)
+                        } else {
+                            // Check for bool _after_ to allow user to realize
+                            // their own stupid mistakes about defaulting a flag
+                            // to true.
+                            // TODO: Prevent setting bool to true entirely?
+                            if any::TypeId::of::<$type_>() == any::TypeId::of::<bool>() {
+                                smargs::SmargKind::Flag
+                            } else {
+                                smargs::SmargKind::Required
+                            }
+                        }
+                    );
+
+                    let kind = kind.expect("argument definition missing the type or default value");
+
+                    smargs.push(smargs::Smarg { desc: $arg_desc, kind, keys });
+                }
+            )+
             smargs
         }
     };
@@ -87,7 +125,7 @@ pub enum Error {
     Empty,
     MissingRequired { expected: usize },
     UndefinedKey(String),
-    Smarg { argument: Smarg, kind: ErrorKind },
+    Smarg { printable_arg: String, kind: ErrorKind },
 }
 
 /// Offer nicer error-messages to user.
@@ -103,7 +141,7 @@ impl fmt::Display for Error {
             }
             // TODO Suggest similar existing arguments in case of user typo.
             Self::UndefinedKey(key) => format!("Option '{}' does not exist", key),
-            Self::Smarg { argument, kind } => format!(
+            Self::Smarg { printable_arg, kind } => format!(
                 "{} Usage: {}",
                 match kind {
                     // TODO Inform how many times the argument was illegally repeated.
@@ -115,7 +153,7 @@ impl fmt::Display for Error {
                         tname, input, e
                     ),
                 },
-                argument,
+                printable_arg
             ),
         };
         write!(f, "{}", msg)
@@ -229,11 +267,14 @@ fn find_matching_idx(args: &mut [Option<(Arg, String)>], key: &'static str) -> O
     })
 }
 
+/// Contains information about a single _definition_ (or declaration?) of an
+/// argument i.e., this is not an abstraction for the concrete things that a
+/// user would submit as arguments for a program.
 #[derive(Debug)]
 pub struct Smarg {
+    pub desc: &'static str,
     pub keys: Vec<&'static str>,
-    pub case: SmargKind,
-    pub kind: ArgType,
+    pub kind: SmargKind<&'static str>,
 }
 
 impl Display for Smarg {
@@ -249,7 +290,7 @@ impl Display for Smarg {
                 .collect()
         };
 
-        let note = match &self.case {
+        let note = match &self.kind {
             SmargKind::Required => "<required value>".to_owned(),
             SmargKind::Optional(default) => format!("<value OR '{}'>", default),
             SmargKind::Flag => "Negated by default".to_owned(),
@@ -259,10 +300,12 @@ impl Display for Smarg {
     }
 }
 
+/// Describes the argument and how it is supplied. NOTE: Generic `T` for future
+/// if I ever figure out using the Any-trait...
 #[derive(Debug, Clone)]
-pub enum SmargKind {
+pub enum SmargKind<T> {
     Required,
-    Optional(String),
+    Optional(T),
     // TODO Just combine this into the ArgType::False and make own method for
     // flag-arguments.
     Flag,
@@ -573,7 +616,7 @@ where
     <T2 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
         Ok((smargs.parse_nth(0)?, smargs.parse_nth(1)?))
     }
 }
@@ -588,7 +631,7 @@ where
     <T3 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -609,7 +652,7 @@ where
     <T4 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -633,7 +676,7 @@ where
     <T5 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -660,7 +703,7 @@ where
     <T6 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -690,7 +733,7 @@ where
     <T7 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -723,7 +766,7 @@ where
     <T8 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Error> {
+    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
