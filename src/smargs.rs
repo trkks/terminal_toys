@@ -4,6 +4,7 @@ use std::error;
 use std::fmt;
 use std::fmt::Display;
 use std::iter;
+use std::marker::PhantomData;
 use std::str::FromStr;
 
 
@@ -78,55 +79,17 @@ use std::str::FromStr;
 /// assert_eq!(age, 26);
 /// ```
 #[derive(Debug)]
-pub struct Smargs {
+pub struct Smargs<Ts> {
     defins: Vec<Smarg>,
     values: Vec<Option<String>>,
+    /// Made-up field required for storing the output type `Ts`.
+    output: PhantomData<Ts>
 }
 
-impl Smargs {
-    /*
-    /// Start a builder defining the order, keys and description of a program
-    /// and its arguments.
-    ///
-    /// `description` is the general description of the program.
-    pub fn builder(_description: &str) -> Self {
-        Self {
-            defins: Vec::new(),
-            values: Vec::new(),
-        }
-    }
-
-    /// Define next an argument which __needs__ to be provided by the user.
-    pub fn required<const N: usize>(mut self, keys: [&'static str; N], description: &str) -> Self {
-        self.push_arg(keys, description, SmargKind::Required);
-        self
-    }
-
-    /// Define next an argument with a default value that will be used if
-    /// nothing is provided by the user.
-    ///
-    /// A boolean argument defaults to FALSE because using a flag essentially
-    /// means signaling the event of or __turning on__ something, certainly not
-    /// the contrary.
-    pub fn optional<const N: usize>(
-        mut self,
-        keys: [&'static str; N],
-        description: &str,
-        default: ArgType,
-    ) -> Self {
-        let kind = match default {
-            ArgType::False => SmargKind::Flag,
-            ArgType::Other(s) => SmargKind::Optional(s.to_owned()),
-        };
-        self.push_arg(keys, description, kind);
-        self
-    }
-
+impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
     /// Parse the argument strings into the type `T` according to the
     /// definition of `self` which may include default values for some.
-    pub fn parse<T>(mut self, mut args: impl Iterator<Item = String>) -> Result<T, Error>
-    where
-        T: TryFrom<Smargs, Error = Error>,
+    pub fn parse(mut self, mut args: impl Iterator<Item = String>) -> Result<Ts, Error>
     {
         // Ignore the executable. TODO Allow saving exe with a .exe() -method?
         // TODO Save it anyway for error/help messages?
@@ -172,9 +135,8 @@ impl Smargs {
         // abstraction like "IntermediateElemT_i" or "FakeT_i" (or perhaps
         // `std::any::Any`?) that could be used to identify the boolean at
         // runtime(?) (and thus get rid of ArgType::False).
-        T::try_from(self)
+        Ts::try_from(self)
     }
-
     /// Validate the keys based on definition and select the values for
     /// arguments based on identified keys.
     ///
@@ -188,21 +150,21 @@ impl Smargs {
     fn resolve_kv_pairs(&mut self, args: &mut Vec<Option<(Arg, String)>>) -> Result<(), Error> {
         self.values = Vec::with_capacity(self.defins.len());
 
-        for smarg @ Smarg { keys, case, kind } in &self.defins {
+        for smarg @ Smarg { desc, keys, kind } in &self.defins {
             let opt = keys.iter().find_map(|x| find_matching_idx(args, x));
 
             // TODO Somehow despookify this if?
             let item = if let Some(key_idx) = opt {
                 // Remove the now unneeded key.
                 args[key_idx] = None;
-                Some(if let SmargKind::Flag = case {
+                Some(if let SmargKind::Flag = kind {
                     true.to_string()
                 } else {
                     // Check existence of and take the subsequent, key-matching,
                     // value.
                     args.get_mut(key_idx + 1)
                         .ok_or(Error::Smarg {
-                            argument: smarg.clone(),
+                            printable_arg: smarg.to_string(),
                             kind: ErrorKind::MissingValue,
                         })?
                         .take()
@@ -215,7 +177,7 @@ impl Smargs {
                     // Flag defaults to false here.
                     SmargKind::Flag => Some(false.to_string()),
                     // Optional is replaced by its specified default.
-                    SmargKind::Optional(default) => Some(default.clone()),
+                    SmargKind::Optional(default) => Some(default.to_string()),
                     // Required will need to be found based on its position.
                     SmargKind::Required => None,
                 }
@@ -227,10 +189,7 @@ impl Smargs {
     }
 
     /// Creates `T` based on a call to `std::env::args`.
-    pub fn from_env<T>(self) -> Result<T, Error>
-    where
-        T: TryFrom<Smargs, Error = Error>,
-    {
+    pub fn from_env(self) -> Result<Ts, Error> {
         self.parse(std::env::args())
     }
 
@@ -239,7 +198,7 @@ impl Smargs {
     fn push_arg<const N: usize>(
         &mut self,
         keys: [&'static str; N],
-        description: &str,
+        description: &'static str,
         kind: SmargKind,
     ) {
         // Check for duplicates keys in user definition TODO This could
@@ -256,8 +215,9 @@ impl Smargs {
             )
         } else {
             self.defins.push(Smarg {
+                desc: description,
                 keys: keys.to_vec(),
-                case: kind,
+                kind,
             });
         }
     }
@@ -282,18 +242,17 @@ impl Smargs {
                 expected: self
                     .defins
                     .iter()
-                    .filter(|x| matches!(x, Smarg { case: SmargKind::Required, ..}))
+                    .filter(|x| matches!(x, Smarg { kind: SmargKind::Required, ..}))
                     .count()
             })?;
 
         value
             .parse()
             .map_err(|e: <T as FromStr>::Err| Error::Smarg {
-                argument: self.defins[index].clone(),
+                printable_arg: self.defins[index].to_string(),
                 kind: ErrorKind::Parsing(std::any::type_name::<T>(), value, Box::new(e)),
             })
     }
-    */
 
     /// Initialize an empty `Smargs` struct.
     ///
@@ -302,6 +261,7 @@ impl Smargs {
         Self {
             defins: Vec::new(),
             values: Vec::new(),
+            output: PhantomData,
         }
     }
 
@@ -320,19 +280,6 @@ impl Smargs {
         }
 
         self.defins.push(smarg);
-    }
-
-    pub fn parse<Ts>(mut self, mut args: impl Iterator<Item = String>) -> Result<Ts, Error>
-    {
-        todo!()
-    }
-
-    fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
-    where
-        T: FromStr,
-        <T as FromStr>::Err: error::Error + 'static,
-    {
-        todo!()
     }
 
     fn validate_format(keys: &[&'static str]) {
@@ -510,7 +457,7 @@ fn find_matching_idx(args: &mut [Option<(Arg, String)>], key: &'static str) -> O
 pub struct Smarg {
     pub desc: &'static str,
     pub keys: Vec<&'static str>,
-    pub kind: SmargKind<&'static str>,
+    pub kind: SmargKind,
 }
 
 impl Display for Smarg {
@@ -536,12 +483,17 @@ impl Display for Smarg {
     }
 }
 
-/// Describes the argument and how it is supplied. NOTE: Generic `T` for future
-/// if I ever figure out using the Any-trait...
+/// Describes the argument and how it is supplied.
 #[derive(Debug, Clone)]
-pub enum SmargKind<T> {
+pub enum SmargKind {
+    /// An argument which __needs__ to be provided by the user.
     Required,
-    Optional(T),
+    /// An argument with a default value that will be used if nothing is
+    /// provided by the user.
+    Optional(&'static str),
+    /// A boolean argument defaulting to FALSE because using a flag essentially
+    /// means signaling the event of or __turning on__ something, certainly not
+    /// the contrary.
     // TODO Just combine this into the ArgType::False and make own method for
     // flag-arguments.
     Flag,
@@ -556,7 +508,7 @@ pub enum ArgType {
 }
 
 
-impl<T1, T2> TryFrom<Smargs> for (T1, T2)
+impl<T1, T2> TryFrom<Smargs<Self>> for (T1, T2)
 where
     T1: FromStr,
     <T1 as FromStr>::Err: error::Error + 'static,
@@ -564,12 +516,12 @@ where
     <T2 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((smargs.parse_nth(0)?, smargs.parse_nth(1)?))
     }
 }
 
-impl<T1, T2, T3> TryFrom<Smargs> for (T1, T2, T3)
+impl<T1, T2, T3> TryFrom<Smargs<Self>> for (T1, T2, T3)
 where
     T1: FromStr,
     <T1 as FromStr>::Err: error::Error + 'static,
@@ -579,7 +531,7 @@ where
     <T3 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -588,7 +540,7 @@ where
     }
 }
 
-impl<T1, T2, T3, T4> TryFrom<Smargs> for (T1, T2, T3, T4)
+impl<T1, T2, T3, T4> TryFrom<Smargs<Self>> for (T1, T2, T3, T4)
 where
     T1: FromStr,
     <T1 as FromStr>::Err: error::Error + 'static,
@@ -600,7 +552,7 @@ where
     <T4 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -610,7 +562,7 @@ where
     }
 }
 
-impl<T1, T2, T3, T4, T5> TryFrom<Smargs> for (T1, T2, T3, T4, T5)
+impl<T1, T2, T3, T4, T5> TryFrom<Smargs<Self>> for (T1, T2, T3, T4, T5)
 where
     T1: FromStr,
     <T1 as FromStr>::Err: error::Error + 'static,
@@ -624,7 +576,7 @@ where
     <T5 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -635,7 +587,7 @@ where
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6> TryFrom<Smargs> for (T1, T2, T3, T4, T5, T6)
+impl<T1, T2, T3, T4, T5, T6> TryFrom<Smargs<Self>> for (T1, T2, T3, T4, T5, T6)
 where
     T1: FromStr,
     <T1 as FromStr>::Err: error::Error + 'static,
@@ -651,7 +603,7 @@ where
     <T6 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -663,7 +615,7 @@ where
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7> TryFrom<Smargs> for (T1, T2, T3, T4, T5, T6, T7)
+impl<T1, T2, T3, T4, T5, T6, T7> TryFrom<Smargs<Self>> for (T1, T2, T3, T4, T5, T6, T7)
 where
     T1: FromStr,
     <T1 as FromStr>::Err: error::Error + 'static,
@@ -681,7 +633,7 @@ where
     <T7 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
@@ -694,7 +646,7 @@ where
     }
 }
 
-impl<T1, T2, T3, T4, T5, T6, T7, T8> TryFrom<Smargs> for (T1, T2, T3, T4, T5, T6, T7, T8)
+impl<T1, T2, T3, T4, T5, T6, T7, T8> TryFrom<Smargs<Self>> for (T1, T2, T3, T4, T5, T6, T7, T8)
 where
     T1: FromStr,
     <T1 as FromStr>::Err: error::Error + 'static,
@@ -714,7 +666,7 @@ where
     <T8 as FromStr>::Err: error::Error + 'static,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
             smargs.parse_nth(0)?,
             smargs.parse_nth(1)?,
