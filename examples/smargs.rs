@@ -26,10 +26,11 @@ fn main() -> Result<(), String> {
 
     let builder = || smargs!(
         "Register for service",
-        ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool, Option::<bool>::None),
-        ("Your full name", vec![], String, Option::<String>::None),
-        ("Email address domain", vec!["d"], String, Some("getspam".to_owned())),
-        ("Your age", vec!["a", "age"], usize, Option::<usize>::None)
+        ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
+        ("Your full name", vec![], String),
+        ("Email address domain", vec!["d"], String, "getspam"),
+        // FIXME: Setting a default here like "42" overrides concrete argument.
+        ("Your age", vec!["a", "age"], usize)
     );
 
     let mut newsletter_subscribers = vec![];

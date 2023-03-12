@@ -189,26 +189,30 @@ macro_rules! smargs {
                 $arg_desc:literal
                 , $keys:expr
                 , $type_:ty
-                , $default:expr
+                $(, $default:expr)?
             )
         ),+
     ) => {
         {
             use std::any;
             use crate::smargs;
-            let mut smargs = smargs::Smargs::new($program_desc);
+            let mut smargs = smargs::Smargs::<( $( $type_, )+ )>::new($program_desc);
             $(
                 {
                     let keys = $keys;
-                    //let mut default = Option::<&'static str>::None;
+                    let mut default = Option::<&'static str>::None;
                     let mut kind = None;
+
+                    $(
+                        default = Some($default);
+                    )?
 
                     // Select kind based on passed type.
                     // TODO Check that default is of type type_?
                     kind = Some(
-                        if let Some(value) = $default {
-                            let default = stringify!(value);
-                            smargs::SmargKind::Optional(default)
+                        if let Some(value) = default {
+                            let default = value.to_owned();
+                            smargs::SmargKind::Optional(value)
                         } else {
                             // Check for bool _after_ to allow user to realize
                             // their own stupid mistakes about defaulting a flag
