@@ -12,18 +12,21 @@ Thingamajigs to make command-line programs more user- and developer-friendly.
 
 ### Example:
 ```rust
+struct MyInput { repeats: usize, string: String, verbose: bool };
 let program_args = vec!["repeat.exe", "-v", "--amount", "3", "foo bar"];
 
-let (n, s, verbose) = terminal_toys::smargs!(
+let MyInput { repeats, string, verbose } = terminal_toys::smargs!(
       "Repeat!",
-      ("Amount of repeats", vec!["amount"], usize),
-      ("The string to repeat", vec![], String),
-      ("Print information about the result", vec!["v", "verbose"], bool)
+      MyInput {
+        repeats:("Amount of repeats",      vec!["amount"],       usize),
+        string: ("The string to repeat",   vec![],               String),
+        verbose:("Print more information", vec!["v", "verbose"], bool)
+      }
     )
     .parse(program_args.into_iter().map(String::from))?;
 
-assert_eq!(n, 3);
-assert_eq!(s, "foo bar");
+assert_eq!(repeats, 3);
+assert_eq!(string, "foo bar");
 assert!(verbose);
 # return Ok::<(), terminal_toys::SmargsError>(())
 ```

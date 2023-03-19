@@ -45,30 +45,47 @@ where
 /// # Examples:
 /// Program arguments will be defined using the builder:
 /// ```
+/// struct Input {
+///     name: String,
+///     age: usize,
+///     domain: String,
+///     no_news: bool,
+/// }
+/// 
 /// let builder = terminal_toys::smargs!(
 ///     "Register for service",
-///     ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
-///     ("Your full name",                    vec![],                String),
-///     ("Email address domain",              vec!["d"],             String,    "getspam"),
-///     ("Your age",                          vec!["a", "age"],      usize)
+///     Input {
+///         no_news:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
+///         name:   ("Your full name",                    vec![],                String),
+///         domain: ("Email address domain",              vec!["d"],             String,    "getspam"),
+///         age:    ("Your age",                          vec!["a", "age"],      usize)
+///     }
 /// );
 /// ```
 /// The different arguments will be recognized from the command line syntax and
 /// parsed into usable types:
 /// ```
 /// # fn main() -> Result<(), String> {
+/// # struct Input {
+/// #     name: String,
+/// #     age: usize,
+/// #     domain: String,
+/// #     no_news: bool,
+/// # }
+/// #
 /// # let builder = terminal_toys::smargs!(
 /// #     "Register for service",
-/// #     ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
-/// #     ("Your full name",                    vec![],                String),
-/// #     ("Email address domain",              vec!["d"],             String,    "getspam"),
-/// #     ("Your age",                          vec!["a", "age"],      usize)
+/// #     Input {
+/// #         no_news:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
+/// #         name:   ("Your full name",                    vec![],                String),
+/// #         domain: ("Email address domain",              vec!["d"],             String,    "getspam"),
+/// #         age:    ("Your age",                          vec!["a", "age"],      usize)
+/// #     }
 /// # );
 /// # let mut newsletter_subscribers = vec![];
 /// let args = vec!["register.exe", "--no-newsletter", "-a", "26", "-d", "hatch", "Matt Myman"].into_iter().map(String::from);
 ///
-/// let (no_news, name, domain, age)
-///     : (bool, String, String, usize)
+/// let Input { no_news, name, domain, age }
 ///     = builder.parse(args).map_err(|e| e.to_string())?;
 ///
 /// if age < 18 {
@@ -96,16 +113,25 @@ where
 /// calling order of the builder-methods. Missing but optional arguments use the
 /// given default value.
 /// ```
+/// # struct Input {
+/// #     name: String,
+/// #     age: usize,
+/// #     domain: String,
+/// #     no_news: bool,
+/// # }
+/// #
 /// # let builder = terminal_toys::smargs!(
 /// #     "Register for service",
-/// #     ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
-/// #     ("Your full name",                    vec![],                String),
-/// #     ("Email address domain",              vec!["d"],             String,    "getspam"),
-/// #     ("Your age",                          vec!["a", "age"],      usize)
+/// #     Input {
+/// #         no_news:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
+/// #         name:   ("Your full name",                    vec![],                String),
+/// #         domain: ("Email address domain",              vec!["d"],             String,    "getspam"),
+/// #         age:    ("Your age",                          vec!["a", "age"],      usize)
+/// #     }
 /// # );
 /// let args = vec!["register.exe", "Matt Myman", "26"].into_iter().map(String::from);
 ///
-/// let (no_news, name, domain, age) : (bool, String, String, usize) = builder.parse(args).unwrap();
+/// let Input { no_news, name, domain, age } = builder.parse(args).unwrap();
 ///
 /// assert!(!no_news);
 /// assert_eq!(name, "Matt Myman".to_string());
@@ -279,7 +305,7 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
         self.parse(std::env::args())
     }
 
-    fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
+    pub fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
     where
         T: FromStr,
         <T as FromStr>::Err: error::Error + 'static,

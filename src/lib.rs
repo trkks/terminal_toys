@@ -178,25 +178,39 @@ macro_rules! color_log {
     };
 }
 
-
 /// Convenience-macro for describing your program and its arguments and
 /// constructing a `Smargs` instance.
 #[macro_export]
 macro_rules! smargs {
     ( 
-        $program_desc:literal, $( 
-            (
-                $arg_desc:literal
-                , $keys:expr
-                , $type_:ty
-                $(, $default:expr)?
-            )
-        ),+
+        $program_desc:literal
+        , $struct_:ident {
+            $( 
+                $field:ident:(
+                    $arg_desc:literal
+                    , $keys:expr
+                    , $type_:ty
+                    $(, $default:expr)?
+                )
+            ),+
+        }
     ) => {
         {
-            use std::any;
-            use terminal_toys::{Smargs, Smarg, SmargKind};
-            let mut smargs = Smargs::<( $( $type_, )+ )>::new($program_desc);
+            use std::{any, convert};
+            use terminal_toys::{Smargs, Smarg, SmargKind, SmargsError};
+            // Implement for the given __custom__ type (because of the orphan
+            // rule) for parsing output.
+            impl convert::TryFrom<Smargs<$struct_>> for $struct_ {
+                type Error = SmargsError;
+                fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
+                    let mut indices = 0..vec![$( $arg_desc ),+].len();
+                    Ok($struct_ {
+                        $( $field: smargs.parse_nth(indices.next().unwrap())? ),+
+                    })
+                }
+            }
+
+            let mut smargs = Smargs::<$struct_>::new($program_desc);
             $(
                 {
                     let keys = $keys;

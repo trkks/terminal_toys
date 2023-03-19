@@ -1,35 +1,25 @@
 use terminal_toys::*;
 
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Input {
-    _name: String,
-    _age: usize,
-    _domain: String,
-    _wants_to_subscribe: bool,
-}
-
-impl From<(bool, String, String, usize)> for Input {
-    // TODO Trying to match the fields this way is error-prone...automate?
-    fn from(value: (bool, String, String, usize)) -> Self {
-        Self {
-            _name: value.1,
-            _age: value.3,
-            _domain: value.2,
-            _wants_to_subscribe: !value.0, // Note negation as flags default to False.
-        }
-    }
+    name: String,
+    age: usize,
+    domain: String,
+    no_subscribe: bool,
 }
 
 /// The same registration application example as seen in the documentation.
 fn main() -> Result<(), String> {
     let builder = || smargs!(
         "Register for service",
-        ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
-        ("Your full name", vec![], String),
-        ("Email address domain", vec!["d"], String, "getspam"),
-        // FIXME: Setting a default here like "42" overrides concrete argument.
-        ("Your age", vec!["a", "age"], usize)
+        Input {
+            name:("Your full name", vec![], String),
+            // FIXME: Setting a default here like "42" overrides concrete argument.
+            age:("Your age", vec!["a", "age"], usize),
+            domain:("Email address domain", vec!["d"], String, "getspam"),
+            no_subscribe:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool)
+        }
     );
 
     let mut newsletter_subscribers = vec![];
@@ -46,7 +36,7 @@ fn main() -> Result<(), String> {
     .into_iter()
     .map(String::from);
 
-    let (no_news, name, domain, age): (bool, String, String, usize) =
+    let Input { no_subscribe, name, domain, age } =
         match builder().parse(std::env::args()) {
             empty_error @ Err(SmargsError::Empty) => {
                 eprint!("You did not pass any arguments. Proceed with example ones [Y/n]?");
@@ -67,8 +57,8 @@ fn main() -> Result<(), String> {
             x => x,
         }
         .map_err(|e| e.to_string())
-        .map(|x: (bool, String, String, usize)| {
-            println!("{:?}", Into::<Input>::into(x.clone()));
+        .map(|x| {
+            println!("{:?}", x.clone());
             x
         })?;
 
@@ -91,7 +81,7 @@ fn main() -> Result<(), String> {
         .to_lowercase();
 
     let subscriber_count = newsletter_subscribers.len();
-    if !no_news {
+    if !no_subscribe {
         newsletter_subscribers.push(&user_email);
     }
 
