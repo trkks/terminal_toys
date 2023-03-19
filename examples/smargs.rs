@@ -1,4 +1,5 @@
-use terminal_toys::smargs;
+use terminal_toys::*;
+
 
 #[derive(Debug)]
 struct Input {
@@ -22,8 +23,6 @@ impl From<(bool, String, String, usize)> for Input {
 
 /// The same registration application example as seen in the documentation.
 fn main() -> Result<(), String> {
-    use terminal_toys::*;
-
     let builder = || smargs!(
         "Register for service",
         ("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
@@ -49,7 +48,7 @@ fn main() -> Result<(), String> {
 
     let (no_news, name, domain, age): (bool, String, String, usize) =
         match builder().parse(std::env::args()) {
-            empty_error @ Err(smargs::Error::Empty) => {
+            empty_error @ Err(SmargsError::Empty) => {
                 eprint!("You did not pass any arguments. Proceed with example ones [Y/n]?");
                 let mut buf = String::new();
                 match std::io::stdin().read_line(&mut buf) {

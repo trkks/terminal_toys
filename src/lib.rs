@@ -1,11 +1,11 @@
 pub mod snake;
 pub mod progress_bar;
 pub mod spinner;
-pub mod smargs;
+mod smargs;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-pub use smargs::{Smargs, ArgType};
+pub use smargs::{Smargs, Smarg, SmargKind, Error as SmargsError};
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -195,8 +195,8 @@ macro_rules! smargs {
     ) => {
         {
             use std::any;
-            use crate::smargs;
-            let mut smargs = smargs::Smargs::<( $( $type_, )+ )>::new($program_desc);
+            use terminal_toys::{Smargs, Smarg, SmargKind};
+            let mut smargs = Smargs::<( $( $type_, )+ )>::new($program_desc);
             $(
                 {
                     let keys = $keys;
@@ -218,20 +218,20 @@ macro_rules! smargs {
                     kind = Some(
                         if arg_is_bool {
                             // Booleans default to false in any case.
-                            smargs::SmargKind::Flag
+                            SmargKind::Flag
                         } else if let Some(value) = default {
                             let default = value.to_owned();
                             // TODO Check that default is of type type_ e.g. by
                             // trying to parse it here?
-                            smargs::SmargKind::Optional(value)
+                            SmargKind::Optional(value)
                         } else {
-                            smargs::SmargKind::Required
+                            SmargKind::Required
                         }
                     );
 
                     let kind = kind.expect("argument definition missing the type or default value");
 
-                    smargs.push(smargs::Smarg { desc: $arg_desc, kind, keys });
+                    smargs.push(Smarg { desc: $arg_desc, kind, keys });
                 }
             )+
             smargs
