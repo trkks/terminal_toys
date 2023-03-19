@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::error;
 use std::fmt;
 use std::fmt::Display;
-use std::iter;
+
 use std::marker::PhantomData;
 use std::str::FromStr;
 
@@ -139,8 +139,7 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
             // (non-Lists only get 1 element).
             let mut values: Vec<Option<Vec<String>>> = vec![None; self.list.len()];
             let mut positioned_index = self.list.iter().position(Self::is_required);
-            loop {
-                let arg = if let Some(x) = args.next() { x } else { break; };
+            while let Some(arg) = args.next() {
                 // Remove the cli-syntax off of keys and normalize the
                 // multi-character groups.
 
@@ -174,8 +173,7 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
                         // consist of multiple flags + possibly a key at the end
                         // i.e., "-abk <value>" => "-a -b -k <value>").
                         let mut keys = arg.chars().skip(1);
-                        loop {
-                            let key = if let Some(x) = keys.next() { x.to_string() } else { break; };
+                        while let Some(key) = keys.next().map(String::from) {
                             let key_matched_index = *self.map.get(&key).ok_or(Error::UndefinedKey(key))?;
                             let smarg = self.list.get(key_matched_index).expect("position not found");
                             match smarg.kind {
@@ -336,7 +334,7 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
 
         // Save and check for duplicate keys in definition.
         for key in &smarg.keys {
-            if let Some(_) = self.map.insert(key.to_string(), self.list.len()) {
+            if self.map.insert(key.to_string(), self.list.len()).is_some() {
                 panic!("Duplicate key defined: '{}'", key);
             }
         }
@@ -348,7 +346,7 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
     /// Check that the keys conform to rules and panic otherwise.
     fn validate_format(keys: &[&'static str]) {
         // __Whitelist__ the allowed characters.
-        const START_CHARACTERS: &'static str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        const START_CHARACTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         const POST_START_CHARACTERS: &[u8] = b"-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         for key in keys {
             if key.is_empty() {
@@ -490,14 +488,6 @@ pub enum SmargKind {
     Flag,
     /// A collection of some minimum number of arguments.
     List(usize),
-}
-
-/// Specifies if an argument is a flag.
-/// TODO Would just plain ol' Optional be adequate?
-#[derive(Debug)]
-pub enum ArgType {
-    False,
-    Other(String),
 }
 
 impl<T1> TryFrom<Smargs<Self>> for (T1,)
@@ -771,7 +761,7 @@ mod tests {
             [
                 ("A", vec!["a"], SmargKind::List(2)),
             ]))
-            .parse("x -a 0 -a 1".split(" ").map(String::from))
+            .parse("x -a 0 -a 1".split(' ').map(String::from))
             .unwrap();
 
         assert_eq!(a.get(0), Some(&0));
@@ -786,7 +776,7 @@ mod tests {
                 ("A", vec!["a"], SmargKind::Required),
             ]))
             .parse(
-                "x -a 0 -a 1".split(" ").map(String::from)
+                "x -a 0 -a 1".split(' ').map(String::from)
             )
             .unwrap_err();
 
