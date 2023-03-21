@@ -400,6 +400,7 @@ pub enum ErrorKind {
 pub enum Error {
     Empty,
     MissingRequired { expected: usize },
+    UndefinedArgument(String),
     UndefinedKey(String),
     Smarg { printable_arg: String, kind: ErrorKind },
 }
@@ -414,18 +415,21 @@ impl fmt::Display for Error {
                 // TODO What about "required _at least_ of X" in case of (future)
                 // list-type arguments?
                 format!("Not enough arguments (expected {}).", expected)
-            }
+            },
+            Self::UndefinedArgument(arg) => {
+                format!("Extra argument '{}'", arg)
+            },
             // TODO Suggest similar existing arguments in case of user typo.
             Self::UndefinedKey(key) => format!("Option '{}' does not exist", key),
             Self::Smarg { printable_arg, kind } => format!(
-                "{} Usage: {}",
+                "{}. Usage: {}",
                 match kind {
                     // TODO Inform how many times the argument was illegally repeated.
-                    ErrorKind::Duplicate => "Too many entries of this argument.".to_owned(),
+                    ErrorKind::Duplicate => "Too many entries of this argument".to_owned(),
                     // TODO Elaborate on the type of value.
-                    ErrorKind::MissingValue => "Option key used but missing the value.".to_owned(),
+                    ErrorKind::MissingValue => "Option key used but missing the value".to_owned(),
                     ErrorKind::Parsing(tname, input, e) => format!(
-                        "Failed to parse the type {} from input '{}': {}.",
+                        "Failed to parse the type {} from input '{}': {}",
                         tname, input, e
                     ),
                 },
@@ -690,73 +694,128 @@ where
 mod tests {
     use super::{Error, ErrorKind, Smargs, SmargKind, List};
 
-    // NOTE: Use the naming scheme of target-method_scenario_expected-behavior.
+    // NOTE: Naming conventions:
+    // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
+    // Abbreviations:
+    // req == Required argument, opt == Optional argument,
+    // <N>th == Argument position in definition,
+    // Ordinality == Argument position in input.
 
     #[test]
-    /// NOTE: This is testing the __implementation__ (on d76cf9288) that does
-    /// multiple attempts on parsing to the required type from string following
-    /// the option.
-    fn parse_flag_and_positional_latter_not_interpreted_as_value_to_former() {
-        let (a, b) = Smargs::<(bool, String)>::from((
+    fn parse_2_reqs_by_position_res_reqs_from_position() {
+        let (a, b) = Smargs::<(usize, usize)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::Required),
+                ("B", vec!["b"], SmargKind::Required),
+            ]))
+            .parse("x 0 1".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+    }
+
+    #[test]
+    fn parse_1st_req_by_key_fst_res_2nd_req_from_position() {
+        let (a, b) = Smargs::<(usize, usize)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::Required),
+                ("B", vec!["b"], SmargKind::Required),
+            ]))
+            .parse("x -a 0 1".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+    }
+
+    #[test]
+    fn parse_2nd_req_by_key_fst_res_1st_req_from_position() {
+        let (a, b) = Smargs::<(usize, usize)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::Required),
+                ("B", vec!["b"], SmargKind::Required),
+            ]))
+            .parse("x -b 1 0".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+    }
+
+    #[test]
+    fn parse_no_opt_res_opt_from_default() {
+        let (a,) = Smargs::<(usize,)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::Optional("0")),
+            ]))
+            .parse("x".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a, 0);
+    }
+
+    #[test]
+    fn parse_opt_by_key_res_opt_from_value() {
+        let (a,) = Smargs::<(usize,)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::Optional("1")),
+            ]))
+            .parse("x -a 0".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a, 0);
+    }
+
+    #[test]
+    fn parse_no_flag_res_flag_from_false() {
+        let (a,) = Smargs::<(bool,)>::from((
             "Test program",
             [
                 ("A", vec!["a"], SmargKind::Flag),
-                ("B", vec![], SmargKind::Required),
             ]))
-            .parse("x -a false".split(' ').map(String::from))
-            .unwrap();
-
-        assert!(a);
-        assert_eq!(b, "false".to_owned());
-    }
-
-    #[test]
-    fn parse_definition_contains_optionals_and_requireds_uses_defaults_for_former() {
-        let (a, b, c, d) = Smargs::<(bool, String, String, usize)>::from((
-            "Test program",
-            [
-                ("A", vec!["Aa"], SmargKind::Flag),
-                ("B", vec![], SmargKind::Required),
-                ("C", vec!["c"], SmargKind::Optional("Ccc")),
-                ("D", vec!["d", "Dd"], SmargKind::Required),
-            ]))
-            .parse("x Bbb 0".split(' ').map(String::from))
+            .parse("x".split(' ').map(String::from))
             .unwrap();
 
         assert!(!a);
-        assert_eq!(b, "Bbb".to_owned());
-        assert_eq!(c, "Ccc".to_owned());
-        assert_eq!(d, 0);
     }
 
     #[test]
-    #[should_panic]
-    fn new_two_flags_have_same_keys_panics() {
-        let _ = Smargs::<(bool, bool)>::from((
+    fn parse_flag_by_key_res_flag_from_true() {
+        let (a,) = Smargs::<(bool,)>::from((
             "Test program",
             [
-                ("A", vec!["a", "b"], SmargKind::Flag),
-                ("B", vec!["a", "b"], SmargKind::Flag),
-            ]
-        ));
+                ("A", vec!["a"], SmargKind::Flag),
+            ]))
+            .parse("x -a".split(' ').map(String::from))
+            .unwrap();
+
+        assert!(a);
     }
 
     #[test]
-    #[should_panic]
-    fn new_two_out_of_three_flags_have_one_same_key_panics() {
-        let _ = Smargs::<(bool, bool, bool)>::from((
+    fn parse_1st_flag_2nd_req_by_key_group_res_2nd_req_from_value() {
+        let (a, b) = Smargs::<(bool, usize)>::from((
             "Test program",
             [
-                ("A", vec!["a", "c"], SmargKind::Flag),
-                ("B", vec!["b"], SmargKind::Flag),
-                ("C", vec!["c"], SmargKind::Flag),
-            ]
-        ));
+                ("A", vec!["a"], SmargKind::Flag),
+                ("B", vec!["b"], SmargKind::Required),
+            ]))
+            .parse("x -ab 1".split(' ').map(String::from))
+            .unwrap();
+
+        assert!(a);
+        assert_eq!(b, 1);
     }
 
     #[test]
-    fn parse_two_values_match_list_type_required_returns_vec() {
-        let (a, ) = Smargs::<(List<usize>, )>::from((
+    fn parse_list2_by_keys_res_list2_from_values() {
+        let (a,) = Smargs::<(List<usize>,)>::from((
             "Test program",
             [
                 ("A", vec!["a"], SmargKind::List(2)),
@@ -768,8 +827,61 @@ mod tests {
         assert_eq!(a.get(1), Some(&1));
     }
 
+    // This seems (too much?) like a use-case...
     #[test]
-    fn parse_two_values_match_same_single_definition_returns_duplicate_error_kind() {
+    fn parse_1st_and_3rd_req_by_pos_no_2nd_opt_res_opt_from_default() {
+        let (a, b, c) = Smargs::<(usize, usize, usize)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::Required),
+                ("B", vec!["b"], SmargKind::Optional("1")),
+                ("C", vec!["c"], SmargKind::Required),
+            ]))
+            .parse("x 0 2".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+        assert_eq!(c, 2);
+    }
+
+    // Error/panic-conditions:
+
+    #[test]
+    fn parse_no_req_res_errors_missing_req() {
+        let err = Smargs::<(usize,)>::from((
+            "Test program",
+            [
+                ("A" , vec!["a"], SmargKind::Required),
+            ]))
+            .parse("x".split(' ').map(String::from))
+            .unwrap_err();
+        
+        assert!(matches!(
+            err,
+            Error::MissingRequired { expected: 1 },
+        ));
+    }
+
+    #[test]
+    fn parse_1st_req_by_pos_2nd_opt_no_key_snd_extra_arg_res_errors_undefined_arg() {
+        let err = Smargs::<(usize, usize)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::Required),
+                ("B", vec!["b"], SmargKind::Optional("1")),
+            ]))
+            .parse("x 0 2".split(' ').map(String::from))
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            Error::UndefinedArgument(s) if s == "2",
+        ));
+    }
+
+    #[test]
+    fn parse_multiple_reqs_by_key_res_errors_duplicate_value() {
         let err = Smargs::<(usize, )>::from((
             "Test program",
             [
@@ -779,115 +891,40 @@ mod tests {
                 "x -a 0 -a 1".split(' ').map(String::from)
             )
             .unwrap_err();
-
+        
         assert!(matches!(
-            match err { Error::Smarg { kind, .. } => kind, _ => panic!("expected Error::Smarg"), },
+            err,
+            Error::Smarg { .. },
+        ));
+        assert!(matches!(
+            match err { Error::Smarg { kind, .. } => kind, _ => panic!("impossible"), },
             ErrorKind::Duplicate,
         ));
     }
 
     #[test]
-    fn parse_grouped_two_short_keys_latter_interpreted_as_key_to_following_value() {
-        let (a, b) = Smargs::<(bool, usize)>::from((
-            "Test program",
-            [
-                ("A", vec!["a"], SmargKind::Flag),
-                ("B", vec!["b"], SmargKind::Required),
-            ]))
-            .parse("x -ab 0".split(' ').map(String::from))
-            .unwrap();
-
-        assert!(a);
-        assert_eq!(b, 0);
-    }
-
-    #[test]
-    fn parse_grouped_short_keys_with_similar_long_latter_interpreted_as_single_key() {
-        let (a, b, c) = Smargs::<(bool, usize, bool)>::from((
-            "Test program",
-            [
-                ("A", vec!["a"], SmargKind::Flag),
-                ("B", vec!["b"], SmargKind::Required),
-                ("C", vec!["ab"], SmargKind::Flag),
-            ]))
-            .parse("x -ab 0 --ab".split(' ').map(String::from))
-            .unwrap();
-
-        assert!(a);
-        assert_eq!(b, 0);
-        assert!(c);
-    }
-
-    #[test]
-    fn parse_no_arguments_returns_empty_error() {
-        let err = Smargs::<(bool, bool)>::from((
-            "Test program",
-            [
-                ("A" , vec!["a"], SmargKind::Flag),
-                ("B" , vec!["b"], SmargKind::Flag),
-            ]))
-            .parse(std::iter::empty())
-            .unwrap_err();
-        
-        assert!(matches!(
-            err,
-            Error::Empty,
-        ));
-    }
-
-    #[test]
-    fn parse_required_missing_value_to_key_at_end_returns_missing_value_error_kind() {
-        let err = Smargs::<(usize, )>::from((
+    fn parse_req_by_key_no_value_res_errors_arg_missing_value() {
+        let err = Smargs::<(usize,)>::from((
             "Test program",
             [
                 ("A", vec!["a"], SmargKind::Required),
             ]))
             .parse("x -a".split(' ').map(String::from))
             .unwrap_err();
-
+        
         assert!(matches!(
-            match err { Error::Smarg { kind, .. } => kind, _ => panic!("expected Error::Smarg"), },
+            err,
+            Error::Smarg { .. },
+        ));
+        assert!(matches!(
+            match err { Error::Smarg { kind, .. } => kind, _ => panic!("impossible"), },
             ErrorKind::MissingValue,
         ));
     }
 
     #[test]
-    fn parse_missing_one_out_of_two_required_options_returns_missing_required_error() {
-        let err = Smargs::<(usize, usize)>::from((
-            "Test program",
-            [
-                ("A" , vec!["a"], SmargKind::Required),
-                ("B" , vec!["b"], SmargKind::Required),
-            ]))
-            .parse("x -b 0".split(' ').map(String::from))
-            .unwrap_err();
-        
-        assert!(matches!(
-            err,
-            Error::MissingRequired { expected: 2 },
-        ));
-    }
-
-    #[test]
-    fn parse_missing_one_out_of_two_required_positionals_returns_missing_required_error() {
-        let err = Smargs::<(usize, usize)>::from((
-            "Test program",
-            [
-                ("A" , vec!["a"], SmargKind::Required),
-                ("B" , vec!["b"], SmargKind::Required),
-            ]))
-            .parse("x 0".split(' ').map(String::from))
-            .unwrap_err();
-        
-        assert!(matches!(
-            err,
-            Error::MissingRequired { expected: 2 },
-        ));
-    }
-
-    #[test]
-    fn parse_undefined_key_found_returns_undefined_key_error() {
-        let err = Smargs::<(usize, )>::from((
+    fn parse_req_by_position_undefined_key_no_value_res_errors_undefined_key() {
+        let err = Smargs::<(usize,)>::from((
             "Test program",
             [
                 ("A" , vec!["a"], SmargKind::Required),
@@ -897,7 +934,23 @@ mod tests {
         
         assert!(matches!(
             err,
-            Error::UndefinedKey(s) if s == "b",
+            Error::UndefinedKey(_),
+        ));
+        assert_eq!(
+            match err { Error::UndefinedKey(x) => x, _ => panic!("impossible"), },
+            "b".to_string(),
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn from_init_tuple_flags_have_same_key_res_panics() {
+        let _ = Smargs::<(bool, bool)>::from((
+            "Test program",
+            [
+                ("A",  vec!["a"], SmargKind::Flag),
+                ("Aa", vec!["a"], SmargKind::Flag),
+            ]
         ));
     }
 }
