@@ -139,6 +139,13 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
             // (non-Lists only get 1 element).
             let mut values: Vec<Option<Vec<String>>> = vec![None; self.list.len()];
             let mut positioned_index = self.list.iter().position(Self::is_required);
+            let next_unsatisfied_required_position = |valuesb: &Vec<Option<_>>|
+                 self.list
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, x)|
+                        (Self::is_required(x) && valuesb[i].is_none()).then_some(i)
+                    );
             while let Some(arg) = args.next() {
                 // Remove the cli-syntax off of keys and normalize the
                 // multi-character groups.
@@ -157,10 +164,10 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
                         // TODO: CHECK IMPLEMENTATION: The positioned options
                         // have lower precedence compared to the explicit
                         // key-value method.
-                        let idx = positioned_index.expect("remaining arguments are not required");
+                        let idx = positioned_index.ok_or_else(|| Error::UndefinedArgument(arg.clone()))?;
                         if values[idx].is_none() {
                             values[idx].replace(vec![arg]);
-                            positioned_index = self.list.iter().enumerate().skip(idx + 1).find_map(|(i, x)| Self::is_required(x).then_some(i));
+                            positioned_index = next_unsatisfied_required_position(&values);
                         } else {
                             panic!(
                                 "tried to replace explicitly specified argument '{}' == '{}' with '{}'",
@@ -201,6 +208,11 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
                                     } else if let Some(value) = args.next() {
                                         if values[key_matched_index].replace(vec![value]).is_some() {
                                             return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::Duplicate });
+                                        } else {
+                                            // Update the position because this
+                                            // required was received based on
+                                            // key-value.
+                                            positioned_index = next_unsatisfied_required_position(&values);
                                         }
                                     } else {
                                         return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::MissingValue });
@@ -235,7 +247,14 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
                             },
                             _ => {
                                 if let Some(value) = args.next() {
-                                    values[key_matched_index].replace(vec![value]);
+                                    if values[key_matched_index].replace(vec![value]).is_some() {
+                                        return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::Duplicate });
+                                    } else {
+                                        // Update the position because this
+                                        // required was received based on
+                                        // key-value.
+                                        positioned_index = next_unsatisfied_required_position(&values);
+                                    }
                                 }
                             }                       
                         }
@@ -244,10 +263,6 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
             }
             values
         };
-
-        if self.values.iter().all(|x| x.is_none()) {
-            return Err(Error::Empty);
-        }
 
         // Handle missing values based on kinds and defaults.
         for (i, value) in self.values.iter_mut().enumerate().filter(|(_, x)| x.is_none()) {
@@ -261,6 +276,10 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
                     },
                 }
             );
+        }
+
+        if self.values.iter().all(|x| x.is_none()) {
+            return Err(Error::Empty);
         }
 
         // HACK: Concat items with a RARE delimiter to support parsing a List
@@ -717,7 +736,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_1st_req_by_key_fst_res_2nd_req_from_position() {
+    fn parse_1st_req_by_short_key_fst_res_2nd_req_from_position() {
         let (a, b) = Smargs::<(usize, usize)>::from((
             "Test program",
             [
@@ -725,6 +744,21 @@ mod tests {
                 ("B", vec!["b"], SmargKind::Required),
             ]))
             .parse("x -a 0 1".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a, 0);
+        assert_eq!(b, 1);
+    }
+
+    #[test]
+    fn parse_1st_req_by_long_key_fst_res_2nd_req_from_position() {
+        let (a, b) = Smargs::<(usize, usize)>::from((
+            "Test program",
+            [
+                ("A", vec!["aa"], SmargKind::Required),
+                ("B", vec!["b"], SmargKind::Required),
+            ]))
+            .parse("x --aa 0 1".split(' ').map(String::from))
             .unwrap();
 
         assert_eq!(a, 0);
@@ -821,6 +855,21 @@ mod tests {
                 ("A", vec!["a"], SmargKind::List(2)),
             ]))
             .parse("x -a 0 -a 1".split(' ').map(String::from))
+            .unwrap();
+
+        assert_eq!(a.get(0), Some(&0));
+        assert_eq!(a.get(1), Some(&1));
+    }
+
+    // TODO: Is this usual/logical behaviour?
+    #[test]
+    fn parse_list2_1st_by_positions_2nd_by_key_res_fst_from_position_snd_from_key() {
+        let (a,) = Smargs::<(List<usize>,)>::from((
+            "Test program",
+            [
+                ("A", vec!["a"], SmargKind::List(2)),
+            ]))
+            .parse("x 0 -a 1".split(' ').map(String::from))
             .unwrap();
 
         assert_eq!(a.get(0), Some(&0));
