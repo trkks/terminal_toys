@@ -278,10 +278,6 @@ impl<Ts: TryFrom<Self, Error = Error>> Smargs<Ts> {
             );
         }
 
-        if self.values.iter().all(|x| x.is_none()) {
-            return Err(Error::Empty);
-        }
-
         // HACK: Concat items with a RARE delimiter to support parsing a List
         // from string.
         for xs in self.values.iter_mut() {
@@ -417,7 +413,6 @@ pub enum ErrorKind {
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
 pub enum Error {
-    Empty,
     MissingRequired { expected: usize },
     UndefinedArgument(String),
     UndefinedKey(String),
@@ -429,7 +424,6 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         let msg = match self {
-            Self::Empty => String::from("No arguments found."),
             Self::MissingRequired { expected } => {
                 // TODO What about "required _at least_ of X" in case of (future)
                 // list-type arguments?

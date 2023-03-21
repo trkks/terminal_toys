@@ -48,8 +48,8 @@ fn main() -> Result<(), String> {
 
     let (no_news, name, domain, age): (bool, String, String, usize) =
         match builder().parse(std::env::args()) {
-            empty_error @ Err(SmargsError::Empty) => {
-                eprint!("You did not pass any arguments. Proceed with example ones [Y/n]?");
+            empty_error @ Err(SmargsError::MissingRequired { .. }) => {
+                eprint!("You did not pass enough arguments. Proceed with example ones [Y/n]?");
                 let mut buf = String::new();
                 match std::io::stdin().read_line(&mut buf) {
                     Ok(_) => {
