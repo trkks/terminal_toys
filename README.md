@@ -28,7 +28,7 @@ let MyInput { repeats, string, verbose } = terminal_toys::smargs!(
 assert_eq!(repeats, 3);
 assert_eq!(string, "foo bar");
 assert!(verbose);
-# return Ok::<(), terminal_toys::SmargsError>(())
+# return Ok::<(), terminal_toys::SmargsBreak>(())
 ```
 
 ## ProgressBar

@@ -20,7 +20,7 @@ fn main() {
             domain:("Email address domain", vec!["d"], String, "getspam"),
             no_subscribe:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool)
         }
-    );
+    ).help_default();
 
     let mut newsletter_subscribers = vec![];
 
