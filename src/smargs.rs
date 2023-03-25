@@ -173,7 +173,7 @@ where
         // Now that no more arguments can be defined, generate the help message.
         let help = self.get_help();
 
-        self.update_values(args, &help)?;
+        self.populate_values(args, &help)?;
 
         // Handle missing values based on kinds and defaults.
         for (i, value) in self.values.iter_mut().enumerate().filter(|(_, x)| x.is_none()) {
@@ -283,7 +283,7 @@ where
     }
 
     /// Populate the values-list in `self` from definition and provided `args`.
-    fn update_values(
+    fn populate_values(
         &mut self,
         args: impl Iterator<Item = String>,
         help: &Help
@@ -312,12 +312,22 @@ where
             // Invalid keys like ones with >2 prefixed dashes will be catched
             // when querying from the key set validated at definition time.
             let (arg, arg_type) = {
-                let (prefix, stripped_key) = arg.split_at(arg.bytes().take(2).take_while(|b| *b == b'-').count());
+                let (prefix_len, stripped_key) = {
+                    let (fst, snd) = arg.split_at(arg.bytes().take(2).take_while(|b| *b == b'-').count());
+                    let n = fst.len();
+                    // Check that things like negative numbers are not
+                    // interpreted as keys.
+                    if n == 1 && Self::validate_key_name(snd).is_err() {
+                        (0, arg)
+                    } else {
+                        (n, snd.to_string())
+                    }
+                };
                 (
                     // NOTE: 'arg' is redefined as not having the prefixed
                     // dashes.
                     stripped_key.to_owned(),
-                    match prefix.len() {
+                    match prefix_len {
                         // Poor man's enum.
                         0 => "value",
                         1 => "short",
@@ -486,7 +496,7 @@ where
     /// Perform checks on new argument definition and add it to the collection
     /// or panic if checks fail.
     pub fn push(&mut self, smarg: Smarg) {
-        Self::validate_format(&smarg.keys);
+        Self::validate_key_names(&smarg.keys);
 
         // Get the correct index to insert (not push) into.
         let handle = if let SmargKind::Help = smarg.kind {
@@ -515,42 +525,50 @@ where
         self.list.insert(handle, smarg);
     }
 
-    /// Check that the keys conform to rules and panic otherwise.
-    fn validate_format(keys: &[&'static str]) {
+    /// Check that the keys (__without prefixes__) conform to rules and panic
+    /// otherwise.
+    fn validate_key_names(keys: &[&'static str]) {
         // __Whitelist__ the allowed characters.
-        const START_CHARACTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        const POST_START_CHARACTERS: &[u8] = b"-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         for key in keys {
-            if key.is_empty() {
-                panic!("A key must not be empty");
-            }
-            if key.contains(' ') {
-                panic!("A key must not contain spaces: '{}'", key);
-            }
-            if !key.is_ascii() {
-                panic!("A key must only contain ASCII characters: {}", key);
-            }
-            
-            let mut bytes = key.bytes();
-            // This is OK as key is guaranteed to contain >0 bytes AND all
-            // characters in key at this point are confirmed to be ASCII.
-            let first_char = bytes.next().unwrap() as char;
-            if !START_CHARACTERS.contains(first_char) {
-                panic!(
-                    "A key must begin with ASCII alphabet: {}",
-                    key.replace(first_char, &format!("***{}***", first_char))
-                );
-            }
-            for byte in bytes {
-                if !POST_START_CHARACTERS.contains(&byte) {
-                    let bad_char = byte as char;
-                    panic!(
-                        "A key must only contain ASCII alphabet, numbers or dash '-': {}",
-                        key.replace(bad_char, &format!("***{}***", bad_char))
-                    );
-                }
+            if let Err(msg) = Self::validate_key_name(key) {
+                panic!("{}", msg)
             }
         }
+    }
+
+    fn validate_key_name(key: &str) -> Result<(), String> {
+        const START_CHARACTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        const POST_START_CHARACTERS: &[u8] = b"-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        if key.is_empty() {
+            return Err(format!("a key must not be empty"));
+        }
+        if key.contains(' ') {
+            return Err(format!("a key must not contain spaces: '{}'", key));
+        }
+        if !key.is_ascii() {
+            return Err(format!("a key must only contain ASCII characters: {}", key));
+        }
+        
+        let mut bytes = key.bytes();
+        // This is OK as key is guaranteed to contain >0 bytes AND all
+        // characters in key at this point are confirmed to be ASCII.
+        let first_char = bytes.next().unwrap() as char;
+        if !START_CHARACTERS.contains(first_char) {
+            return Err(format!(
+                "a key must begin with ASCII alphabet: {}",
+                key.replace(first_char, &format!("***{}***", first_char))
+            ));
+        }
+        for byte in bytes {
+            if !POST_START_CHARACTERS.contains(&byte) {
+                let bad_char = byte as char;
+                return Err(format!(
+                    "a key must only contain ASCII alphabet, numbers or dash '-': {}",
+                    key.replace(bad_char, &format!("***{}***", bad_char))
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Return if the definition represents a required argument.
@@ -994,6 +1012,49 @@ mod tests {
     }
 
     #[test]
+    fn parse_req_int_by_position_looks_like_key_res_req_from_position() {
+        let (a,) = Smargs::<(i32,)>::from((
+            "Test program",
+            [
+                ("A" , vec!["a"], SmargKind::Required),
+            ]))
+            .parse("x -1".split(' ').map(String::from))
+            .unwrap();
+        
+        assert_eq!(a, -1);
+    }
+
+    #[test]
+    fn parse_req_string_by_key_value_looks_like_another_key_res_req_from_value() {
+        let (s, a) = Smargs::<(String, usize)>::from((
+            "Test program",
+            [
+                ("S" , vec!["s"], SmargKind::Required),
+                ("A" , vec!["a"], SmargKind::Optional("0")),
+            ]))
+            .parse("x -s -a".split(' ').map(String::from))
+            .unwrap();
+        
+        assert_eq!(s, "-a");
+        assert_eq!(a, 0);
+    }
+
+    // TODO: Would this be usual/logical behaviour? Could using the "--" before
+    // positional arguments or smth help the confusion?
+    //#[test]
+    fn parse_req_string_by_position_looks_like_key_res_req_from_position() {
+        let (s,) = Smargs::<(String,)>::from((
+            "Test program",
+            [
+                ("S" , vec![], SmargKind::Required),
+            ]))
+            .parse("x -s".split(' ').map(String::from))
+            .unwrap();
+        
+        assert_eq!(s, "-s");
+    }
+
+    #[test]
     fn parse_no_opt_res_opt_from_default() {
         let (a,) = Smargs::<(usize,)>::from((
             "Test program",
@@ -1252,6 +1313,26 @@ mod tests {
             match err { Break { err: Error::UndefinedKey(x), .. } => x, _ => panic!("impossible"), },
             "b".to_string(),
         );
+    }
+
+    #[test]
+    fn parse_req_by_position_bad_value_res_errors_parsing_failed() {
+        let err = Smargs::<(usize,)>::from((
+            "Test program",
+            [
+                ("A" , vec!["a"], SmargKind::Required),
+            ]))
+            .parse("x -1".split(' ').map(String::from))
+            .unwrap_err();
+        
+        assert!(matches!(
+            err,
+            Break{err: Error::Smarg { .. }, .. },
+        ));
+        assert!(matches!(
+            match err { Break { err: Error::Smarg { ref kind, .. }, ..} => kind, _ => panic!("impossible"), },
+            ErrorKind::Parsing(..),
+        ));
     }
 
     #[test]
