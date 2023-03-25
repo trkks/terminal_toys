@@ -15,7 +15,6 @@ fn main() {
         "Register for service",
         Input {
             name:("Your full name", vec![], String),
-            // FIXME: Setting a default here like "42" overrides concrete argument.
             age:("Your age", vec!["a", "age"], usize),
             domain:("Email address domain", vec!["d"], String, "getspam"),
             no_subscribe:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool)
@@ -58,7 +57,10 @@ fn main() {
                 eprintln!("{}", e);
                 std::process::exit(1);
             },
-            Ok(x) => x,
+            Ok(x) => {
+                println!("{:?}", x);
+                x
+            }
         }
     };
 

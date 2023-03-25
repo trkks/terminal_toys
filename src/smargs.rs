@@ -425,15 +425,19 @@ where
         Ok(())
     }
 
-    /// NOTE: Not be called by user directly; instead use the `From`
-    /// implementations or `smargs` macro.
+    /// NOTE: Not to be called by user directly; instead use the `From`
+    /// implementations or `smargs` macro!
     /// 
-    /// Parse value of arg defined in `index` into the type `T`.
-    pub fn parse_nth<T>(&mut self, index: usize) -> Result<T, Error>
+    /// Parse into the type `T` the value of arg defined in 0-based `index`.
+    pub fn parse_nth<T>(&mut self, mut index: usize) -> Result<T, Error>
     where
         T: FromStr,
         <T as FromStr>::Err: error::Error + 'static,
     {
+        // Skip the Help-index if present.
+        if let Smarg { kind: SmargKind::Help, .. } = self.list[0] {
+            index += 1;
+        }
         // TODO This seems unnecessarily complex...
         let mut value = self
             .values

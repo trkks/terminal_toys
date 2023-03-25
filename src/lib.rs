@@ -203,9 +203,13 @@ macro_rules! smargs {
             impl convert::TryFrom<Smargs<$struct_>> for $struct_ {
                 type Error = SmargsError;
                 fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
+                    // The definition order matches this macro's and the field
+                    // names are order agnostic.
                     let mut indices = 0..vec![$( $arg_desc ),+].len();
                     Ok($struct_ {
-                        $( $field: smargs.parse_nth(indices.next().unwrap())? ),+
+                        // The turbofished type_ should not make any difference
+                        // but just in case.
+                        $( $field: smargs.parse_nth::<$type_>(indices.next().unwrap())? ),+
                     })
                 }
             }
