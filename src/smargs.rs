@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
 use std::error;
 use std::fmt;
 use std::fmt::Display;
-use std::iter;
+use std::iter::{self, FromIterator};
 
 use std::marker::PhantomData;
 use std::str::FromStr;
@@ -132,8 +132,12 @@ impl<Ts> Smargs<Ts>
 where
     Ts: TryFrom<Self, Error = Error>,
 {
-    /// Parse the argument strings into the type `T` according to the
-    /// definition of `self` which may include default values for some.
+    /// Parse the argument strings into the type `Ts` according to the
+    /// definition of `self` which may include using default values for some
+    /// fields.
+    /// 
+    /// Note that the name of the program/command is assumed to be the first
+    /// item in `args`.
     pub fn parse(mut self, mut args: impl Iterator<Item = String>) -> Result<Ts, Break>
     {
         if let Some(name) = args.next() {
@@ -193,14 +197,15 @@ where
         self.parse(std::env::args())
     }
 
-    /// Define the help message argument to match the keys: "h" and "help". See
-    /// `help_key`.
-    pub fn help(self) -> Self {
+    /// Set the help keys to: "-h" and "--help". See `Self::help_keys`.
+    pub fn help_default(self) -> Self {
         self.help_keys(vec!["h", "help"])
     }
 
-    /// Define `keys` that, if present in arguments, interrupt the parsing and
-    /// return an automatically generated help message.
+    /// Convenience method for defining the argument with which to request for a
+    /// help message. When any of the `keys` are encountered, the argument
+    /// parsing will be interrupted and return an automatically generated help
+    /// message.
     pub fn help_keys(mut self, keys: Vec<&'static str>) -> Self {
         self.push(Smarg { desc: "Show this help message", keys, kind: SmargKind::Help });
 
@@ -268,10 +273,12 @@ where
     }
 
     /// Populate the values-list in `self` from definition and provided `args`.
-    fn update_values(&mut self, mut args: impl Iterator<Item = String>) -> Result<(), Error> {
+    fn update_values(&mut self, args: impl Iterator<Item = String>) -> Result<(), Error> {
+        let mut args = VecDeque::from_iter(args);
+
         // Put the values encountered into their specified indices.
         // Items are Vec<String> in order to support the List-variant
-        // (non-Lists only get 1 element).
+        // (non-Lists will contain only 1 element).
         let mut values = vec![None; self.list.len()];
         let mut positioned_index = self.list.iter().position(Self::is_required);
         let next_unsatisfied_required_position = |valuesb: &Vec<Option<_>>|
@@ -281,18 +288,26 @@ where
                 .find_map(|(i, x)|
                     (Self::is_required(x) && valuesb[i].is_none()).then_some(i)
                 );
-        while let Some(arg) = args.next() {
+        while let Some(arg) = args.pop_front() {
             // Remove the cli-syntax off of keys and normalize the
             // multi-character groups.
 
             // Assume prefix length is max 2.
-            // The validation of keys will handle invalid keys like ones
-            // with >2 prefixed dashes.
-            let arg_type = match arg.chars().take(2).take_while(|c| *c == '-').count() {
-                // Poor man's enum.
-                0 => "value",
-                1 => "short",
-                _ => "long",
+            // Invalid keys like ones with >2 prefixed dashes will be catched
+            // when querying from the key set validated at definition time.
+            let (arg, arg_type) = {
+                let (prefix, stripped_key) = arg.split_at(arg.bytes().take(2).take_while(|b| *b == b'-').count());
+                (
+                    // NOTE: 'arg' is redefined as not having the prefixed
+                    // dashes.
+                    stripped_key.to_owned(),
+                    match prefix.len() {
+                        // Poor man's enum.
+                        0 => "value",
+                        1 => "short",
+                        _ => "long",
+                    }
+                )
             };
             match arg_type {
                 "value" => {
@@ -310,60 +325,31 @@ where
                         );
                     }
                 },
-                "short" => {
-                    // Loop in order to handle multi-character group (which
-                    // consist of multiple flags + possibly a key at the end
+                "short" if arg.len() > 1 => {
+                    // Replace the args-queue's front with the "normalized"
+                    // multi-character group (which consist of multiple flags +
+                    // possibly a key at the end
                     // i.e., "-abk <value>" => "-a -b -k <value>").
-                    let mut keys = arg.chars().skip(1);
-                    while let Some(key) = keys.next().map(String::from) {
-                        let key_matched_index = *self.map.get(&key).ok_or(Error::UndefinedKey(key))?;
-                        let smarg = self.list.get(key_matched_index).expect("position not found");
-                        match smarg.kind {
-                            SmargKind::Flag => {
-                                if values[key_matched_index].replace(vec![true.to_string()]).is_some() {
-                                    panic!(
-                                        "tried to replace already specified argument '{}' with '{}'",
-                                        smarg, arg,
-                                    );
-                                }
-                            },
-                            SmargKind::List(_min) => {
-                                // This case here is why `values` contains Vec<String>'s.
-                                if let Some(list) = values[key_matched_index].as_mut() {
-                                    if let Some(value) = args.next() {
-                                        list.push(value);
-                                    } else {
-                                        return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::MissingValue });
-                                    }
-                                }
-                            },
-                            _ => {
-                                if let Some(_key) = keys.next() {
-                                    panic!("expected value but got key in group");
-                                } else if let Some(value) = args.next() {
-                                    if values[key_matched_index].replace(vec![value]).is_some() {
-                                        return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::Duplicate });
-                                    } else {
-                                        // Update the position because this
-                                        // required was received based on
-                                        // key-value.
-                                        positioned_index = next_unsatisfied_required_position(&values);
-                                    }
-                                } else {
-                                    return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::MissingValue });
-                                }
-                            }
-                        }
+                    let keys = arg.chars().map(|c| format!("-{}", c)).enumerate();
+                    // NOTE: There did not seem to be a reverse method for
+                    // VecDequeue::append e.g., "prepend" or smth.
+                    // Insert the keys "in order" to the front i.e.,
+                    // indx:  0, 1,..     0, 1, 2,..     0, 1, 2, 3,..
+                    // elem: -a:-_:xs -> -a:-b:-_:xs -> -a:-b:-k:-_:xs -> ...
+                    for (i, new_arg) in keys {
+                        args.insert(i, new_arg);
                     }
+                    // Let the main-loop handle these added "new" keys normally.
                 },
-                /* "long" */ _ => {
-                    let key = arg.chars().skip(2).collect();
-                    let key_matched_index = *self.map.get(&key).ok_or(Error::UndefinedKey(key))?;
+                /* "long" | "short" if arg.len() == 1 */ _ => {
+                    let key_matched_index = *self.map.get(&arg).ok_or(Error::UndefinedKey(arg.clone()))?;
                     let smarg = self.list.get(key_matched_index).expect("position not found");
 
                     match smarg.kind {
-                        SmargKind::Flag => {
+                        SmargKind::Flag | SmargKind::Help => {
                             if values[key_matched_index].replace(vec![true.to_string()]).is_some() {
+                                // TODO: Wouldn't this more specifically be
+                                // "Error::DuplicateFlag(arg)"?
                                 panic!(
                                     "tried to replace already specified argument '{}' with '{}'",
                                     smarg, arg,
@@ -373,7 +359,7 @@ where
                         SmargKind::List(_min) => {
                             // This case here is why `values` contains Vec<String>'s.
                             if let Some(list) = values[key_matched_index].as_mut() {
-                                if let Some(value) = args.next() {
+                                if let Some(value) = args.pop_front() {
                                     list.push(value);
                                 } else {
                                     return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::MissingValue });
@@ -381,7 +367,7 @@ where
                             }
                         },
                         _ => {
-                            if let Some(value) = args.next() {
+                            if let Some(value) = args.pop_front() {
                                 if values[key_matched_index].replace(vec![value]).is_some() {
                                     return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::Duplicate });
                                 } else {
@@ -390,6 +376,8 @@ where
                                     // key-value.
                                     positioned_index = next_unsatisfied_required_position(&values);
                                 }
+                            } else {
+                                return Err(Error::Smarg { printable_arg: smarg.to_string(), kind: ErrorKind::MissingValue })
                             }
                         }                       
                     }
@@ -456,20 +444,31 @@ where
     pub fn push(&mut self, smarg: Smarg) {
         Self::validate_format(&smarg.keys);
 
+        // Get the correct index to insert (not push) into.
+        let handle = if let SmargKind::Help = smarg.kind {
+            if let Some(Smarg { kind: SmargKind::Help, .. }) = self.list.get(0) {
+                panic!("the help argument can not be defined more than once");
+            }
+            // The zeroth index is reserved for Help so all the others will be
+            // shifted once to the right, which is equivalent to incrementing
+            // each existing handle by one.
+            for handle in self.map.values_mut() {
+                *handle += 1;
+            }
+            0
+        } else {
+            self.list.len()
+        };
+
         // Save and check for duplicate keys in definition.
         for key in &smarg.keys {
-            if self.map.insert(key.to_string(), self.list.len()).is_some() {
+            if self.map.insert(key.to_string(), handle).is_some() {
                 panic!("Duplicate key defined: '{}'", key);
             }
         }
 
-        // Add the definition.
-        if let SmargKind::Help = smarg.kind {
-            // The zeroth index is reserved for Help.
-            self.list.insert(0, smarg);
-        } else {
-            self.list.push(smarg);
-        }
+        // Finally add the definition.
+        self.list.insert(handle, smarg);
     }
 
     /// Check that the keys conform to rules and panic otherwise.
@@ -1014,7 +1013,7 @@ mod tests {
 
     // TODO: Is this usual/logical behaviour?
     #[test]
-    fn parse_list2_1st_by_positions_2nd_by_key_res_fst_from_position_snd_from_key() {
+    fn parse_list2_fst_by_position_snd_by_key_res_fst_from_position_snd_from_key() {
         let (a,) = Smargs::<(List<usize>,)>::from((
             "Test program",
             [
@@ -1046,13 +1045,27 @@ mod tests {
     }
 
     #[test]
-    fn parse_help_by_key_req_by_key_res_breaks_generated_help() {
+    fn parse_help_by_key_res_errors_generated_help() {
+        let err = Smargs::<(usize,)>::from(("Test program", [ ]))
+            .help_default()
+            .parse("x --help".split(' ').map(String::from))
+            .unwrap_err();
+        
+        assert!(matches!(
+            err,
+            Break { err: Error::Help, help }
+                if !help.is_empty(),
+        ));
+    }
+
+    #[test]
+    fn parse_req_by_key_fst_help_by_key_res_errors_generated_help() {
         let err = Smargs::<(usize,)>::from((
             "Test program",
             [
                 ("A" , vec!["a"], SmargKind::Required),
             ]))
-            .help()
+            .help_default()
             .parse("x -a 0 --help".split(' ').map(String::from))
             .unwrap_err();
         
@@ -1135,7 +1148,7 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break{err:Error::Smarg { .. }, .. },
+            Break{err: Error::Smarg { .. }, .. },
         ));
         assert!(matches!(
             match err { Break { err: Error::Smarg { kind, .. }, ..} => kind, _ => panic!("impossible"), },
