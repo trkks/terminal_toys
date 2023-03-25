@@ -5,7 +5,7 @@ mod smargs;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-pub use smargs::{Smargs, Smarg, SmargKind, Error as SmargsError};
+pub use smargs::{Smargs, Smarg, SmargKind, Break as SmargsBreak, Error as SmargsError};
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]

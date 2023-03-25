@@ -10,7 +10,7 @@ struct Input {
 }
 
 /// The same registration application example as seen in the documentation.
-fn main() -> Result<(), String> {
+fn main() {
     let builder = || smargs!(
         "Register for service",
         Input {
@@ -25,7 +25,7 @@ fn main() -> Result<(), String> {
     let mut newsletter_subscribers = vec![];
 
     let example_args = vec![
-        "register.exe",
+        "register",
         "--no-newsletter",
         "-a",
         "26",
@@ -36,31 +36,31 @@ fn main() -> Result<(), String> {
     .into_iter()
     .map(String::from);
 
-    let Input { no_subscribe, name, domain, age } =
-        match builder().parse(std::env::args()) {
-            empty_error @ Err(SmargsError::Empty) => {
-                eprint!("You did not pass any arguments. Proceed with example ones [Y/n]?");
+    let Input { no_subscribe, name, domain, age } = {
+        // Catch this error in order to make demonstration of actual parsing easier.
+        match match builder().parse(std::env::args()) {
+            missing_args@Err(SmargsBreak { err: SmargsError::MissingRequired { .. }, .. }) => {
+                eprint!("You did not pass enough arguments. Proceed with example ones [Y/n]?");
                 let mut buf = String::new();
-                match std::io::stdin().read_line(&mut buf) {
-                    Ok(_) => {
-                        let s = buf.trim().to_lowercase();
-                        let n = s.len();
-                        if s.is_empty() || n <= 3 && "yes"[..n] == s[..n] {
-                            builder().parse(example_args)
-                        } else {
-                            empty_error
-                        }
-                    }
-                    _ => empty_error,
+                std::io::stdin().read_line(&mut buf).expect("failed reading stdin");
+                let s = buf.trim().to_lowercase();
+                let n = s.len();
+                if s.is_empty() || n <= 3 && "yes"[..n] == s[..n] {
+                    builder().parse(example_args)
+                } else {
+                    // Let the error continue on.
+                    missing_args
                 }
             }
-            x => x,
+            result_of_parsing => result_of_parsing,
+        } {
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            },
+            Ok(x) => x,
         }
-        .map_err(|e| e.to_string())
-        .map(|x| {
-            println!("{:?}", x.clone());
-            x
-        })?;
+    };
 
     if age < 18 {
         let ys = 18 - age;
@@ -94,5 +94,4 @@ fn main() -> Result<(), String> {
             "did not subscribe"
         }
     );
-    Ok(())
 }
