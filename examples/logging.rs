@@ -1,6 +1,6 @@
-use terminal_toys::{log, color_log, Color};
+use terminal_toys::{log, color_log, textcolor::{BRIGHT_RED, GREEN, RESET, BLACK, RED}};
 
-const TTOYSLOG_COLOR: Color = Color::BrightRed;
+const TTOYSLOG_COLOR: &str = BRIGHT_RED;
 
 fn main() {
     println!(
@@ -8,7 +8,20 @@ fn main() {
         macro, this example will not show any log messages."
     );
     log!("Log message");
-    color_log!("Log message colored '{:?}'", TTOYSLOG_COLOR);
+    color_log!("Colored log message");
+
+    // Highlight errors and successes.
+    println!("{}{} - Bad request: {}{}", RED, 400, RESET, "foo",);
+    match Some(42) { Some(n) => println!("{}OK {}", GREEN, n), _ => { } }
+
+    // Print a 8x7 heart ❤️.
+    println!("  {}████{}    {}████{}",       BLACK, RESET, BLACK, RESET);
+    println!("{}██{}████{}████{}████{}██{}", BLACK,   RED, BLACK,   RED, BLACK, RESET);
+    println!("{}██{}████████████{}██{}",     BLACK,   RED, BLACK, RESET);
+    println!("{}██{}████████████{}██{}",     BLACK,   RED, BLACK, RESET);
+    println!("  {}██{}████████{}██{}",       BLACK,   RED, BLACK, RESET);
+    println!("    {}██{}████{}██{}",         BLACK,   RED, BLACK, RESET);
+    println!("      {}████{}",               BLACK, RESET);
 }
 
 #[cfg(test)]

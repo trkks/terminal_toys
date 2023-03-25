@@ -2,21 +2,20 @@
 Thingamajigs to make command-line programs more user- and developer-friendly.
 
 ## Smargs
-- Program argument options you define will be automatically parsed from strings
-  to the needed types.
-- Return fitting help messages when:
-  - Arguments could not be parsed correctly,
-  - Duplicates of an option were found (TODO Allow lists when so required e.g. `grep -f file1 -f file2 ...`),
-  - There were no arguments at all,
-  - The `--help` option is used.
+- Easily parse program arguments based on your definition into required types.
+- Return automatically generated help messages when for example:
+  - Argument could not be parsed correctly
+  - Not enough or too many arguments are given
+  - Duplicate or undefined option keys are used
+  - Help is requested with the `--help` option
 
 ### Example:
 ```rust
-# use terminal_toys::{Smargs, ArgType};
-let program_args = vec!["repeat.exe", "-v", "--amount", "3", "foo bar"];
+use terminal_toys::{Smargs, ArgType};
+let program_args = vec!["repeat", "-v", "--amount", "3", "foo bar"];
 
 let (n, s, verbose) : (usize, String, bool) =
-  Smargs::builder("Repeat!")
+  Smargs::builder("Repeat a string!")
     .required(["amount"], "Amount of repeats")
     .required([], "The string to repeat")
     .optional(["v", "verbose"], "Print information about the result", ArgType::False)
@@ -25,7 +24,7 @@ let (n, s, verbose) : (usize, String, bool) =
 assert_eq!(n, 3);
 assert_eq!(s, "foo bar");
 assert!(verbose);
-# return Ok::<(), terminal_toys::smargs::Error>(())
+return Ok::<(), terminal_toys::smargs::Error>(())
 ```
 
 ## ProgressBar
@@ -46,16 +45,16 @@ Thread #8  90% [==================..]
 The `start_spinner` -function animates the basic spinner (`(|) > (/) > (-) >
 (\)`) while waiting on your function-call to finish:
 ```rust
-# use terminal_toys::spinner;
-# fn my_long_process() -> u32 { 42 }
+use terminal_toys::spinner;
+fn my_long_process() -> u32 { 42 }
 let result = spinner::start_spinner(|| my_long_process());
 ```
 
 ## Color
-Print colors on the command-line with the two `color_print*`-macros:
+Print colors on the command-line by setting current color with constants:
 ```rust
-# use terminal_toys::{color_print, Color};
-color_print!(Color::Green, "The color of envy");
+use terminal_toys::textcolor::{GREEN, RESET};
+println!("{}The color of envy{}", GREEN, RESET);
 ```
 
 ## snake

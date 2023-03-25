@@ -11,114 +11,48 @@ pub use smargs::{Smargs, ArgType};
 #[cfg(doctest)]
 pub struct ReadmeDoctests;
 
-#[derive(Debug)]
-pub enum Color {
-    Black,
-    Red,
-    Green,
-    Yellow,
-    Blue,
-    Magenta,
-    Cyan,
-    White,
-    Gray,
-    BrightRed,
-    BrightGreen,
-    BrightYellow,
-    BrightBlue,
-    BrightMagenta,
-    BrightCyan,
-    BrightWhite,
-}
-
-impl Color {
-    /// Return the color's ANSI-code -string for printing.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Color::Black         => "30",
-            Color::Red           => "31",
-            Color::Green         => "32",
-            Color::Yellow        => "33",
-            Color::Blue          => "34",
-            Color::Magenta       => "35",
-            Color::Cyan          => "36",
-            Color::White         => "37",
-            Color::Gray          => "90",
-            Color::BrightRed     => "91",
-            Color::BrightGreen   => "92",
-            Color::BrightYellow  => "93",
-            Color::BrightBlue    => "94",
-            Color::BrightMagenta => "95",
-            Color::BrightCyan    => "96",
-            Color::BrightWhite   => "97",
-        }
-    }
-
-    /// Wraps the string in ANSI-code of the specified color for printing.
-    ///
-    /// # Example
-    /// ```
-    /// use terminal_toys::Color;
-    /// // Print the finnish flag
-    /// let blue  = Color::color_string(Color::BrightBlue,  "###");
-    /// let white = Color::color_string(Color::BrightWhite, "###");
-    /// println!("{}{}{}{}", white, blue,  white, white);
-    /// println!("{}{}{}{}", blue,  blue,  blue,  blue );
-    /// println!("{}{}{}{}", white, blue,  white, white);
-    /// ```
-    pub fn color_string(c: Self, s: &str) -> String {
-        format!("\x1B[{}m{}\x1B[m", c.code(), s)
-    }
-}
-
-/// Using `std::print!` wraps the string-formatting in ANSI-code of the
-/// specified color.
-/// NOTE Printing other ANSI-coloring-codes with this macro will break the
-/// specified color from that point for the rest of the print.
-/// (Reference used: https://en.wikipedia.org/wiki/ANSI_escape_code#Colors)
+/// String sequences that when printed start coloring the following text. Note
+/// that to stop the coloring (i.e., return back to "normal), append whatever
+/// you're coloring with `textcolor::RESET`.
 ///
-/// # Example
+/// Reference used: https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
+/// 
+/// # Examples
+/// Highlight errors and successes.
 /// ```
-/// use terminal_toys::{Color, color_print};
-/// color_print!(Color::Red, "{} - Bad request: {}", 400, "foo",);
-/// match Some(42) { Some(n) => color_print!(Color::Green, "OK"), _ => { } }
+/// # use terminal_toys::textcolor::{RED, GREEN, RESET};
+/// println!("{}{} - Bad request: {}{}", RED, 400, RESET, "foo",);
+/// match Some(42) { Some(n) => println!("{}OK", GREEN), _ => { } }
 /// ```
-#[macro_export]
-macro_rules! color_print {
-    // A Color and a string are mandatory arguments;
-    // latter starts a sequence that should work like the normal print macro.
-    // The third match is for allowing optional trailing comma.
-    ($c:expr, $($x:expr),+ $(,)?) => {
-        {
-            // TODO should line-wrapping be considered?
-            // See
-            // https://tldp.org/HOWTO/Bash-Prompt-HOWTO/nonprintingchars.html
-            // Start the color
-            print!("\x1B[{}m", $c.code());
-            // Print normally
-            print!($($x),+);
-            // Reset the color back to normal
-            print!("\x1B[m");
-        }
-    };
-}
-
-/// Same as `terminal_toys::color_print` but appends a newline at the end.
-/// # Example
+/// Print a 8x7 heart ❤️.
 /// ```
-/// use terminal_toys::{color_println, Color};
-/// color_println!(Color::Red, "{} - Bad request: {}", 400, "foo",);
-/// match Some(42) { Some(n) => color_println!(Color::Green, "OK"), _ => { } }
+/// # use terminal_toys::textcolor::{BLACK, RED, RESET};
+/// println!("  {}████{}    {}████{}",       BLACK, RESET, BLACK, RESET);
+/// println!("{}██{}████{}████{}████{}██{}", BLACK,   RED, BLACK,   RED, BLACK, RESET);
+/// println!("{}██{}████████████{}██{}",     BLACK,   RED, BLACK, RESET);
+/// println!("{}██{}████████████{}██{}",     BLACK,   RED, BLACK, RESET);
+/// println!("  {}██{}████████{}██{}",       BLACK,   RED, BLACK, RESET);
+/// println!("    {}██{}████{}██{}",         BLACK,   RED, BLACK, RESET);
+/// println!("      {}████{}",               BLACK, RESET);
 /// ```
-#[macro_export]
-macro_rules! color_println {
-    // The third match is for allowing optional trailing comma.
-    ($c:expr, $($x:expr),+ $(,)?) => {
-        {
-            terminal_toys::color_print!($c, $($x),+);
-            println!();
-        }
-    };
+pub mod textcolor {
+    pub const RESET: &str          = "\x1B[m";
+    pub const BLACK: &str          = "\x1B[30m";
+    pub const RED: &str            = "\x1B[31m";
+    pub const GREEN: &str          = "\x1B[32m";
+    pub const YELLOW: &str         = "\x1B[33m";
+    pub const BLUE: &str           = "\x1B[34m";
+    pub const MAGENTA: &str        = "\x1B[35m";
+    pub const CYAN: &str           = "\x1B[36m";
+    pub const WHITE: &str          = "\x1B[37m";
+    pub const GRAY: &str           = "\x1B[90m";
+    pub const BRIGHT_RED: &str     = "\x1B[91m";
+    pub const BRIGHT_GREEN: &str   = "\x1B[92m";
+    pub const BRIGHT_YELLOW: &str  = "\x1B[93m";
+    pub const BRIGHT_BLUE: &str    = "\x1B[94m";
+    pub const BRIGHT_MAGENTA: &str = "\x1B[95m";
+    pub const BRIGHT_CYAN: &str    = "\x1B[96m";
+    pub const BRIGHT_WHITE: &str   = "\x1B[97m";
 }
 
 /// Log a message from module `x` IF an environment variable `TTOYSLOG` has
@@ -157,8 +91,8 @@ macro_rules! log {
 /// # Example:
 /// ```
 /// // Logs printing out in red.
-/// use terminal_toys::{Color, color_log};
-/// const TTOYSLOG_COLOR: Color = Color::Yellow;
+/// use terminal_toys::{color_log, textcolor};
+/// const TTOYSLOG_COLOR: &str = textcolor::YELLOW;
 /// color_log!("Did a {} with {}", "thing", "stuff",);
 /// match Some(42) { Some(n) => color_log!("OK"), _ => color_log!("fail") }
 /// ```
@@ -168,13 +102,11 @@ macro_rules! color_log {
         if let Some(value) = option_env!("TTOYSLOG") {
             let full_path = module_path!();
             if full_path.split("::").any(|m| value.contains(m)) {
-                terminal_toys::color_print!(
-                    TTOYSLOG_COLOR, "[{}:{}] ", full_path, line!()
-                );
+                print!("{}[{}:{}] ", TTOYSLOG_COLOR, full_path, line!());
                 // Print message with its formatting
-                terminal_toys::color_println!(TTOYSLOG_COLOR, $($message),+);
+                print!("{}", TTOYSLOG_COLOR);
+                println!($($message),+);
             }
         }
     };
 }
-
