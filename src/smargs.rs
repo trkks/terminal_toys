@@ -151,7 +151,7 @@ pub struct Smargs<Ts> {
     /// Made-up field required for storing the output type `Ts`.
     output: PhantomData<Ts>,
     /// Field where the given arguments are stored for parsing later.
-    values: Vec<Option<Vec<String>>>,
+    values: Vec<Vec<String>>,
 }
 
 impl<Ts> Smargs<Ts>
@@ -173,10 +173,14 @@ where
         // Now that no more arguments can be defined, generate the help message.
         let help = self.get_help();
 
-        self.populate_values(args, &help)?;
+        let mut values = self.explicit_values(args, &help)?;
 
         // Handle missing values based on kinds and defaults.
-        for (i, value) in self.values.iter_mut().enumerate().filter(|(_, x)| x.is_none()) {
+        for (i, value) in values
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, x)| x.is_none())
+        {
             value.replace(
                 match self.list[i].kind {
                     SmargKind::Optional(default) => vec![default.to_owned()],
@@ -194,10 +198,13 @@ where
 
         // HACK: Concat items with a RARE delimiter to support parsing a List
         // from string.
-        for xs in self.values.iter_mut() {
+        for xs in values.iter_mut() {
             let single_string = xs.take().unwrap().join(",");
             xs.replace(vec![single_string]);
         }
+
+        // Update self with the resolved values.
+        self.values = values.into_iter().map(|x| x.expect("not all values handled")).collect();
 
         Ts::try_from(self).map_err(|err| help.short_break(err))
     }
@@ -282,12 +289,15 @@ where
         Help { short, long }
     }
 
-    /// Populate the values-list in `self` from definition and provided `args`.
-    fn populate_values(
-        &mut self,
+    /// Find the explicitly provided values based on definition and `args`.
+    /// 
+    /// NOTE: The amount of resulting values must be equal to the amount of
+    /// definitions!
+    fn explicit_values(
+        &self,
         args: impl Iterator<Item = String>,
         help: &Help
-    ) -> Result<(), Break> {
+    ) -> Result<Vec<Option<Vec<String>>>, Break> {
         // TODO: A stack would work just as well (i.e., refactor to use Vec
         // instead -> avoids confusion as to why exactly use VecDeque).
         let mut args = VecDeque::from_iter(args);
@@ -295,6 +305,7 @@ where
         // Put the values encountered into their specified indices.
         // Items are Vec<String> in order to support the List-variant
         // (non-Lists will contain only 1 element).
+
         let mut values = vec![None; self.list.len()];
         let mut positioned_index = self.list.iter().position(Self::is_required);
         let next_unsatisfied_required_position = |valuesb: &Vec<Option<_>>|
@@ -431,8 +442,7 @@ where
             }
         }
 
-        self.values = values;
-        Ok(())
+        Ok(values)
     }
 
     /// NOTE: Not to be called by user directly; instead use the `From`
@@ -449,23 +459,16 @@ where
             index += 1;
         }
         // TODO This seems unnecessarily complex...
-        let mut value = self
+        let value = self
             .values
-            .get_mut(index)
-            .unwrap_or_else(|| {
-                panic!(
+            .get(index)
+            .expect(
+                &format!(
                     "Smargs.values constructed incorrectly: None in index {}",
                     index
                 )
-            })
-            .take()
-            .ok_or(Error::MissingRequired {
-                expected_count: self
-                    .list
-                    .iter()
-                    .filter(|x| matches!(x, Smarg { kind: SmargKind::Required, ..}))
-                    .count()
-            })?;
+            );
+
 
         value[0]
             .parse()
@@ -473,7 +476,7 @@ where
                 printable_arg: self.list[index].to_string(),
                 kind: ErrorKind::Parsing(
                     std::any::type_name::<T>(),
-                    std::mem::replace(&mut value[0], "".to_string()),
+                    value[0].clone(),
                     Box::new(e)
                 ),
             })
@@ -605,6 +608,7 @@ impl Help {
 /// The reason for interruption or "break" when parsing based on `Smargs` can
 /// either be because an error occurred or because of an explicit help-request
 /// to describe the program by its arguments.
+/// TODO: `impl ops::Try for Break`?
 #[derive(Debug)]
 pub struct Break { pub err: Error, pub help: String }
 
