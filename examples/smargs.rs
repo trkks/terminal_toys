@@ -1,23 +1,30 @@
-use terminal_toys::*;
+use terminal_toys::{smargs, SmargsBreak, SmargsError};
 
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct Input {
-    name: String,
-    age: usize,
-    domain: String,
+    name:         String,
+    age:          usize         ,
+    local_part:   Result<String, SmargsError>,
+    domain:       String,
     no_subscribe: bool,
 }
 
 /// The same registration application example as seen in the documentation.
 fn main() {
+
     let builder = || smargs!(
         "Register for service",
         Input {
-            name:("Your full name", vec![], String),
-            age:("Your age", vec!["a", "age"], usize),
-            domain:("Email address domain", vec!["d"], String, "getspam"),
-            no_subscribe:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool)
+            name:         ("Your full name"                   , [               ], String              ),
+            age:          ("Your age"                         , ["a", "age"     ], usize               ),
+            local_part:   (
+                "Email address without domain e.g. if address is 'foo@bar.baz' provide the 'foo' part",
+                ["e"],
+                {String}
+            ),
+            domain:       ("Email address domain"             , ["d"            ], String  , "coolnewz"),
+            no_subscribe: ("Opt-out from receiving newsletter", ["no-newsletter"], bool                ),
         }
     ).help_default();
 
@@ -35,7 +42,7 @@ fn main() {
     .into_iter()
     .map(String::from);
 
-    let Input { no_subscribe, name, domain, age } = {
+    let Input { name, age, local_part, domain, no_subscribe } = {
         // Catch this error in order to make demonstration of actual parsing easier.
         match match builder().parse(std::env::args()) {
             missing_args@Err(SmargsBreak { err: SmargsError::MissingRequired { .. }, .. }) => {
@@ -78,7 +85,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let user_email = format!("{}.{}@{}.com", name, age, domain)
+    let user_email = format!("{}@{}.com", local_part.unwrap_or_else(|_| format!("{}.{}", name, age)), domain)
         .replace(' ', ".")
         .to_lowercase();
 

@@ -184,75 +184,131 @@ macro_rules! color_log {
 macro_rules! smargs {
     ( 
         $program_desc:literal
-        , $struct_:ident {
+        , $container:ident {
             $( 
                 $field:ident:(
-                    $arg_desc:literal
-                    , $keys:expr
-                    , $type_:ty
-                    $(, $default:expr)?
+                    $arg_desc:literal,
+                    $keys:expr,
+                    $sugar_type_kind:tt
+                    $(, $default:expr )?
                 )
-            ),+
+            ),+ $(,)?
         }
     ) => {
         {
             use std::{any, convert};
             use terminal_toys::{Smargs, Smarg, SmargKind, SmargsError};
-            // Implement for the given __custom__ type (because of the orphan
-            // rule) for parsing output.
-            impl convert::TryFrom<Smargs<$struct_>> for $struct_ {
+            // Implement for the given __custom__ output type (because of the
+            // orphan rule) in order to parse from input.
+            impl convert::TryFrom<Smargs<$container>> for $container {
                 type Error = SmargsError;
                 fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
                     // The definition order matches this macro's and the field
                     // names are order agnostic.
                     let mut indices = 0..vec![$( $arg_desc ),+].len();
-                    Ok($struct_ {
+                    Ok($container {
                         // The turbofished type_ should not make any difference
                         // but just in case.
-                        $( $field: smargs.parse_nth::<$type_>(indices.next().unwrap())? ),+
+                        $( $field: terminal_toys::make_field_entry!( smargs, indices, $sugar_type_kind ) ),+
+
                     })
                 }
             }
 
-            let mut smargs = Smargs::<$struct_>::new($program_desc);
-            $(
-                {
-                    let keys = $keys;
-                    let mut default = Option::<&'static str>::None;
-                    let mut kind = None;
-                    
-                    let arg_is_bool = any::TypeId::of::<$type_>() == any::TypeId::of::<bool>();
-
-                    $(
-                        // Prevent using default on a bool entirely (Note that
-                        // this is a runtime check).
-                        if arg_is_bool {
-                            panic!("boolean argument defaults only to \"false\" and must do so automatically (remove \"{}\").", $default);
-                        }
-                        default = Some($default);
-                    )?
-
-                    // Select kind based on passed type.
-                    kind = Some(
-                        if arg_is_bool {
-                            // Booleans default to false in any case.
-                            SmargKind::Flag
-                        } else if let Some(value) = default {
-                            let default = value.to_owned();
-                            // TODO Check that default is of type type_ e.g. by
-                            // trying to parse it here?
-                            SmargKind::Optional(value)
-                        } else {
-                            SmargKind::Required
-                        }
-                    );
-
-                    let kind = kind.expect("argument definition missing the type or default value");
-
-                    smargs.push(Smarg { desc: $arg_desc, kind, keys });
-                }
-            )+
+            let mut smargs = Smargs::<$container>::new($program_desc);
+            $( terminal_toys::push_smarg!( smargs, $arg_desc, $keys, $sugar_type_kind $(, $default )? ); )+
             smargs
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! make_field_entry {
+    // The Result<T, SmargsError> -returning case.
+    ( $smargs_:ident, $indices:ident, {$type_:ty} ) => {
+        $smargs_.parse_nth::< $type_ >($indices.next().unwrap())
+    };
+
+    ( $smargs_:ident, $indices:ident, $type_:ty ) => {
+        $smargs_.parse_nth::< $type_ >($indices.next().unwrap())?
+    };
+    // TODO: Make this more general case work in order to support the [Type]-lists as well.
+    //( $smargs_:ident, $indices:ident, $sugar_type:tt ) => {
+    //    $smargs_.parse_nth::< terminal_toys::desugar_type!( $sugar_type ) >($indices.next().unwrap())
+    //};
+}
+
+/// Replace with the type this syntax-sugared input string represents (e.g., {T}
+/// => Result<T, SmargsError> or plain T => concrete type T).
+#[macro_export]
+macro_rules! desugar_type {
+    // Kind::Required (Result).
+    ( {$type_when_ok:ty} ) => {
+        Result<$type_when_ok, SmargsError>
+    };
+
+    // Any(?).
+    ( $type_:ty ) => {
+        $type_
+    };
+}
+
+#[macro_export]
+macro_rules! push_smarg {
+    ( $smargs:ident, $arg_desc:literal, $keys:expr, $sugar_type:tt $(, $default:tt )? ) => {
+        {
+            let keys = $keys.to_vec();
+            let mut default = Option::<&'static str>::None;
+            let mut kind = None;
+
+            let arg_is_bool = any::TypeId::of::< terminal_toys::desugar_type!( $sugar_type ) >() == any::TypeId::of::<bool>();
+
+            $(
+                // Prevent using default on a bool entirely (Note that
+                // this is a runtime check).
+                if arg_is_bool {
+                    panic!("boolean arguments default only to \"false\" and do so automatically (remove \"{}\").", $default);
+                }
+                default = Some($default);
+            )?
+
+            kind = Some( terminal_toys::desugar_kind!( arg_is_bool, terminal_toys::desugar_type!( $sugar_type ), default ) );
+
+            let kind = kind.expect("argument definition missing the type or default value");
+
+            $smargs.push(Smarg { desc: $arg_desc, keys, kind });
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! desugar_kind {
+    ( $arg_is_bool:expr, $_normal_type:ty $(, $default:expr )? ) => {
+        {
+            // Select kind based on passed type.
+            if $arg_is_bool {
+                // Booleans default to false in any case.
+                SmargKind::Flag
+            } else if let Some(value) = $( $default )? {
+                let default = value.to_owned();
+                // TODO Check that default is of type type_ e.g. by
+                // trying to parse it here?
+                SmargKind::Optional(value)
+            } else {
+                SmargKind::Required
+            }
+        }
+    };
+
+    ( $_arg_is_bool:expr, [$_type:ty] $(, $_default:expr )? ) => {
+        {
+            SmargKind::List(0)
+        }
+    };
+
+    ( $_arg_is_bool:expr, [$_type:ty; $n:expr] $(, $_default:expr )? ) => {
+        {
+            SmargKind::List($n)
         }
     };
 }
