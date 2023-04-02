@@ -7,26 +7,32 @@ Thingamajigs to make command-line programs more user- and developer-friendly.
   - Argument could not be parsed correctly
   - Not enough or too many arguments are given
   - Duplicate or undefined option keys are used
-  - Help is requested with the `--help` option
+  - ~~Help is requested with the `--help` option~~
 
 ### Example:
 ```rust
 struct MyInput { repeats: usize, string: String, verbose: bool };
-let program_args = vec!["repeat.exe", "-v", "--amount", "3", "foo bar"];
+let program_args = vec!["echon", "-v", "--amount", "3", "foo bar"];
 
-let MyInput { repeats, string, verbose } = terminal_toys::smargs!(
-      "Repeat!",
-      MyInput {
-        repeats:("Amount of repeats",      vec!["amount"],       usize),
-        string: ("The string to repeat",   vec![],               String),
-        verbose:("Print more information", vec!["v", "verbose"], bool)
-      }
-    )
-    .parse(program_args.into_iter().map(String::from))?;
+let MyInput { repeats, string, verbose } = terminal_toys::smargsparse!(
+  "Echo a string N times",
+  MyInput {
+    repeats:("Amount of echoes",       vec!["amount"],       terminal_toys::SmargKind::Required),
+    string: ("The string to echo",     vec![],               terminal_toys::SmargKind::Required),
+    verbose:("Print more information", vec!["v", "verbose"], terminal_toys::SmargKind::Flag)
+  },
+  program_args.into_iter().map(String::from)
+)?;
 
 assert_eq!(repeats, 3);
 assert_eq!(string, "foo bar");
 assert!(verbose);
+
+for i in 0..repeats {
+  print!("{}", string);
+  if verbose { eprintln!("{} repeats left", repeats - (i + 1)); }
+}
+
 # return Ok::<(), terminal_toys::SmargsBreak>(())
 ```
 

@@ -116,8 +116,8 @@ macro_rules! color_log {
 /// constructing a `Smargs` instance and then parsing the actual arguments.
 ///
 /// # Examples:
-/// Program description and arguments are defined using a list of argument
-/// description, keys and kind and finally parsed from an `Iterator<Item =
+/// Program description and arguments are defined using a list of tuples
+/// `(description, keys, kind)` and finally parsed from an `Iterator<Item =
 /// String>` into requested types:
 /// ```
 /// struct Input(usize, bool, String);
