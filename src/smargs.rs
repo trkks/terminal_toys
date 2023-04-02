@@ -12,131 +12,17 @@ use std::marker::PhantomData;
 /// definition.
 /// TODO: Make this always contain a minimum number of items to work together
 /// with the SmargKind::List(min).
-pub struct List<T: FromStr>(Vec<T>);
+pub struct List<T: FromStr>(pub Vec<T>);
 
-impl<T: FromStr> List<T> {
-    pub fn get(&self, index: usize) -> Option<&T> {
-        self.0.get(index)
+        
+impl<T: FromStr> From<List<T>> for Vec<T> {
+    fn from(value: List<T>) -> Self {
+        value.0
     }
 }
 
-impl<T> std::str::FromStr for List<T>
-where
-    T: FromStr,
-{
-    type Err = <T as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // TODO: Improve this HACK by, instead of using ',', searching for a
-        // character not present in any of the original strings. This would
-        // become a problem only when the __whole UTF-8 space__ is used in
-        // arguments.
-        let mut xs = Vec::new();
-        for x in s.split(',') {
-            xs.push(<T as FromStr>::from_str(x)?);
-        }
-        Ok(List(xs))
-    }
-}
-
-/// SiMpler thAn wRiting it once aGain Surely :)
-///
-/// # Examples:
-/// Program arguments will be defined using the builder:
-/// ```
-/// struct Input {
-///     name: String,
-///     age: usize,
-///     domain: String,
-///     no_news: bool,
-/// }
-/// 
-/// let builder = terminal_toys::smargs!(
-///     "Register for service",
-///     Input {
-///         no_news:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
-///         name:   ("Your full name",                    vec![],                String),
-///         domain: ("Email address domain",              vec!["d"],             String,    "getspam"),
-///         age:    ("Your age",                          vec!["a", "age"],      usize)
-///     }
-/// );
-/// ```
-/// The different arguments will be recognized from the command line syntax and
-/// parsed into usable types:
-/// ```
-/// # fn main() -> Result<(), String> {
-/// # struct Input {
-/// #     name: String,
-/// #     age: usize,
-/// #     domain: String,
-/// #     no_news: bool,
-/// # }
-/// #
-/// # let builder = terminal_toys::smargs!(
-/// #     "Register for service",
-/// #     Input {
-/// #         no_news:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
-/// #         name:   ("Your full name",                    vec![],                String),
-/// #         domain: ("Email address domain",              vec!["d"],             String,    "getspam"),
-/// #         age:    ("Your age",                          vec!["a", "age"],      usize)
-/// #     }
-/// # );
-/// # let mut newsletter_subscribers = vec![];
-/// let args = vec!["register.exe", "--no-newsletter", "-a", "26", "-d", "hatch", "Matt Myman"].into_iter().map(String::from);
-///
-/// let Input { no_news, name, domain, age }
-///     = builder.parse(args).map_err(|e| e.to_string())?;
-///
-/// if age < 18 {
-///     let ys = 18 - age;
-///     let putdown = format!(
-///         "come back in {}",
-///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
-///     );
-///     eprintln!("Failed to register: {}", putdown);
-///     std::process::exit(1);
-/// }
-///
-/// let user_email = format!("{}.{}@{}.com", name, age, domain).replace(' ', ".").to_lowercase();
-///
-/// let subscriber_count = newsletter_subscribers.len();
-/// if !no_news {
-///     newsletter_subscribers.push(&user_email);
-/// }
-///
-/// assert_eq!(user_email, "matt.myman.26@hatch.com".to_string());
-/// assert_eq!(newsletter_subscribers.len(), subscriber_count);
-/// # Ok(()) }
-/// ```
-/// Required arguments can also be passed based on position defined by the
-/// calling order of the builder-methods. Missing but optional arguments use the
-/// given default value.
-/// ```
-/// # struct Input {
-/// #     name: String,
-/// #     age: usize,
-/// #     domain: String,
-/// #     no_news: bool,
-/// # }
-/// #
-/// # let builder = terminal_toys::smargs!(
-/// #     "Register for service",
-/// #     Input {
-/// #         no_news:("Opt-out from receiving newsletter", vec!["no-newsletter"], bool),
-/// #         name:   ("Your full name",                    vec![],                String),
-/// #         domain: ("Email address domain",              vec!["d"],             String,    "getspam"),
-/// #         age:    ("Your age",                          vec!["a", "age"],      usize)
-/// #     }
-/// # );
-/// let args = vec!["register.exe", "Matt Myman", "26"].into_iter().map(String::from);
-///
-/// let Input { no_news, name, domain, age } = builder.parse(args).unwrap();
-///
-/// assert!(!no_news);
-/// assert_eq!(name, "Matt Myman".to_string());
-/// assert_eq!(domain, "getspam".to_string());
-/// assert_eq!(age, 26);
-/// ```
+/// Struct for defining program arguments and parsing them from command line
+/// syntax into required types.
 #[derive(Debug)]
 pub struct Smargs<Ts> {
     /// Thing to iterate over values with when parsing.
@@ -811,6 +697,27 @@ where
     }
 }
 
+impl<T> FromStr for List<T>
+where
+    T: std::str::FromStr,
+    <T as std::str::FromStr>::Err: Into<Error>,
+{
+    type Err = <T as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> where Self: Sized {
+        // TODO: Improve this HACK by, instead of using ',', searching for a
+        // character not present in any of the original strings. This would
+        // become a problem only when the __whole UTF-8 space__ is used in
+        // arguments.
+        let mut xs = Vec::new();
+        for x in s.split(',') {
+            xs.push(<T as FromStr>::from_str(x)?);
+        }
+        Ok(List(xs))
+    }
+
+}
+
 /* START: Implementations for errors from parsing strings into types supported by default */
 // TODO: Couldn't these really be implemented with constrained generics?
 impl From<std::str::ParseBoolError> for Error {
@@ -1073,8 +980,8 @@ mod tests {
             .parse("x -a 0 -a 1".split(' ').map(String::from))
             .unwrap();
 
-        assert_eq!(a.get(0), Some(&0));
-        assert_eq!(a.get(1), Some(&1));
+        assert_eq!(a.0.get(0), Some(&0));
+        assert_eq!(a.0.get(1), Some(&1));
     }
 
     // TODO: Is this usual/logical behaviour?
@@ -1088,8 +995,8 @@ mod tests {
             .parse("x 0 -a 1".split(' ').map(String::from))
             .unwrap();
 
-        assert_eq!(a.get(0), Some(&0));
-        assert_eq!(a.get(1), Some(&1));
+        assert_eq!(a.0.get(0), Some(&0));
+        assert_eq!(a.0.get(1), Some(&1));
     }
 
     #[test]

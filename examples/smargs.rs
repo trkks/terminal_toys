@@ -1,4 +1,4 @@
-use terminal_toys::{smargs, SmargsBreak, SmargsResult, SmargsError};
+use terminal_toys::{smargsparse, SmargsBreak, SmargsResult, SmargsError};
 use std::{str::FromStr, fmt::Display};
 
 
@@ -41,9 +41,8 @@ impl From<StringIsEmptyError> for SmargsError {
 struct RegistrationInfo(String, usize, SmargsResult<NonEmptyString>, String, bool);
 
 fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, SmargsBreak> {
-    smargs!(
+    smargsparse!(
         "Register for a service",
-        SmargKind::Help,
         RegistrationInfo(
             ("Your full name",                    [],                SmargKind::Required),
             ("Your age",                          ["a", "age"],      SmargKind::Required),
@@ -55,7 +54,7 @@ fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, SmargsBre
             ("Email address domain",              ["d"],             SmargKind::Optional("coolnewz")),
             ("Opt-out from receiving newsletter", ["no-newsletter"], SmargKind::Flag),
         ),
-        args
+        args,
     )
 }
 
@@ -123,10 +122,10 @@ fn main() {
     }
 
     let user_email = {
-        let mut split = domain.rsplitn(1, '.');
-        let (domain, tld) = match (split.next(), split.next()) {
-            (Some(l), Some(r)) if l.len() > 0 && r.len() > 0 => (l, r),
-            (Some(l), None) if l.len() > 0 => (l, "com"),
+        let mut split = domain.rsplit_once('.');
+        let (domain, tld) = match split {
+            Some((l, r)) if l.len() > 0 && r.len() > 0 => (l, r),
+            Some((l, _)) if l.len() > 0 => (l, "com"),
             _ => panic!("malformed domain: '{}'", domain),
         };
 
