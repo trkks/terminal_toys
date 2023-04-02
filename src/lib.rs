@@ -5,7 +5,8 @@ mod smargs;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-pub use smargs::{Smargs, Smarg, SmargKind, Break as SmargsBreak, Error as SmargsError};
+pub use smargs::{Smargs, Smarg, SmargKind, Break as SmargsBreak, SmargsResult, Error as SmargsError};
+
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -178,81 +179,48 @@ macro_rules! color_log {
     };
 }
 
-/// Convenience-macro for describing your program and its arguments and
-/// constructing a `Smargs` instance.
+/// Convenience-macro for describing your program and its expected arguments,
+/// constructing a `Smargs` instance and then parsing the actual arguments.
 #[macro_export]
 macro_rules! smargs {
     ( 
         $program_desc:literal
-        , $struct_:ident {
-            $( 
-                $field:ident:(
-                    $arg_desc:literal
-                    , $keys:expr
-                    , $type_:ty
-                    $(, $default:expr)?
-                )
-            ),+
-        }
+        , $( $help:expr )?
+        , $container:ident ( $( ($arg_desc:literal, $keys:expr, $kind:expr $(,)?) ),+ $(,)? )
+        , $input_args:expr $(,)?
     ) => {
         {
-            use std::{any, convert};
-            use terminal_toys::{Smargs, Smarg, SmargKind, SmargsError};
-            // Implement for the given __custom__ type (because of the orphan
-            // rule) for parsing output.
-            impl convert::TryFrom<Smargs<$struct_>> for $struct_ {
+            use terminal_toys::{select_unwrapping, Smargs, Smarg, SmargKind, SmargsError};
+            // Implement parsing into the given __custom__ (needed for passing
+            // it to Smargs<Ts>) output type (with special Result-type when so
+            // requested, because of the orphan rule/possibility of "upstream
+            // changes").
+            impl std::convert::TryFrom<Smargs<$container>> for $container {
                 type Error = SmargsError;
                 fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
-                    // The definition order matches this macro's and the field
-                    // names are order agnostic.
-                    let mut indices = 0..vec![$( $arg_desc ),+].len();
-                    Ok($struct_ {
-                        // The turbofished type_ should not make any difference
-                        // but just in case.
-                        $( $field: smargs.parse_nth::<$type_>(indices.next().unwrap())? ),+
-                    })
+                    Ok(
+                        $container (
+                            $( select_unwrapping!( smargs, $kind ) ),+
+                        )
+                    )
                 }
             }
 
-            let mut smargs = Smargs::<$struct_>::new($program_desc);
-            $(
-                {
-                    let keys = $keys;
-                    let mut default = Option::<&'static str>::None;
-                    let mut kind = None;
-                    
-                    let arg_is_bool = any::TypeId::of::<$type_>() == any::TypeId::of::<bool>();
+            let mut smargs = Smargs::<$container>::new($program_desc);
+            $( smargs.push(Smarg { desc: $arg_desc, keys: $keys.to_vec(), kind: $kind }); )+
 
-                    $(
-                        // Prevent using default on a bool entirely (Note that
-                        // this is a runtime check).
-                        if arg_is_bool {
-                            panic!("boolean argument defaults only to \"false\" and must do so automatically (remove \"{}\").", $default);
-                        }
-                        default = Some($default);
-                    )?
-
-                    // Select kind based on passed type.
-                    kind = Some(
-                        if arg_is_bool {
-                            // Booleans default to false in any case.
-                            SmargKind::Flag
-                        } else if let Some(value) = default {
-                            let default = value.to_owned();
-                            // TODO Check that default is of type type_ e.g. by
-                            // trying to parse it here?
-                            SmargKind::Optional(value)
-                        } else {
-                            SmargKind::Required
-                        }
-                    );
-
-                    let kind = kind.expect("argument definition missing the type or default value");
-
-                    smargs.push(Smarg { desc: $arg_desc, kind, keys });
-                }
-            )+
-            smargs
+            smargs.parse($input_args)
         }
+    };
+}
+
+#[macro_export]
+macro_rules! select_unwrapping {
+    ( $smargs_:ident, SmargKind::Maybe ) => {
+        $smargs_.parse_next().0
+    };
+
+    ( $smargs_:ident, $unwrappable_kind:expr ) => {
+        $smargs_.parse_next().0?
     };
 }
