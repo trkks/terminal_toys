@@ -464,7 +464,7 @@ where
     /// implementations or `smargs` macro!
     /// 
     /// Parse into the type `T` the next value of arg defined in running order.
-    pub fn parse_next<T>(&mut self) -> SmargsResult<T>
+    pub fn parse_next<T>(&mut self) -> Result<T, Error>
     where
         T: FromStr,
     {
@@ -484,23 +484,15 @@ where
         {
             // Manual unwrap-exiting because std::ops::Try is unstable.
             Ok(x) => x,
-            Err(e) => return SmargsResult(Err(e)),
+            Err(e) => return Err(e),
         };
 
-        let return_value = <T as FromStr>::from_str(&value[0])
-            .map_err(|e| e.into()/*::Smarg {
-                printable_arg: self.list[index].to_string(),
-                kind: ErrorKind::Parsing(
-                    std::any::type_name::<T>(),
-                    value[0].clone(),
-                    e.to_string()
-                ),
-            }*/);
+        let return_value = <T as FromStr>::from_str(&value[0]).map_err(|e| e.into());
 
         // Update index.
         self.index += 1;
 
-        SmargsResult(return_value)
+        return_value
     }
 
     /// Initialize an empty `Smargs` struct.
@@ -662,7 +654,7 @@ impl Error {
 impl fmt::Display for Break {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f, "{}",
+            f, "Parsing interrupted because of {}",
             match self.err {
                 // Argument-specific error.
                 Error::Smarg { .. } => self.err.to_string(),
@@ -702,7 +694,7 @@ impl fmt::Display for Error {
                 },
                 printable_arg
             ),
-            Self::Dummy(msg) => format!("Baka. {}", msg),
+            Self::Dummy(msg) => format!("{}, baka.", msg),
         };
         write!(f, "{}", msg)
     }
@@ -761,8 +753,9 @@ pub enum SmargKind {
     Flag,
     /// A collection of some minimum number of arguments.
     List(usize),
-    /// An argument that returns with its error instead of panicking so the
-    /// default can be computed after when parsing has failed.
+    /// An argument that returns with its error instead of interrupting (i.e.,
+    /// `Break`ing) so the default can be computed after when parsing has
+    /// failed.
     Maybe,
 }
 
@@ -809,29 +802,32 @@ where
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: Into<Error>,
 {
-    type Err = <T as std::str::FromStr>::Err;
+    type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         <T as FromStr>::from_str(s)
             .map(|x| SmargsResult(Ok(x)))
+            // Wrap the error inside.
+            .or_else(|e| Ok(SmargsResult(Err(e.into()))))
     }
 }
 
 /* START: Implementations for errors from parsing strings into types supported by default */
+// TODO: Couldn't these really be implemented with constrained generics?
 impl From<std::str::ParseBoolError> for Error {
     fn from(value: std::str::ParseBoolError) -> Self {
-        todo!()
+        Self::dummy(value)
     }
 }
 
 impl From<std::num::ParseIntError> for Error {
     fn from(value: std::num::ParseIntError) -> Self {
-        todo!()
+        Self::dummy(value)
     }
 }
 
 impl From<std::convert::Infallible> for Error {
     fn from(value: std::convert::Infallible) -> Self {
-        todo!()
+        Self::dummy(value)
     }
 }
 /* END */
@@ -851,7 +847,7 @@ where
 {
     type Error = Error;
     fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
-        Ok((smargs.parse_next().0?,))
+        Ok((smargs.parse_next()?,))
     }
 }
 
@@ -863,8 +859,8 @@ where
     type Error = Error;
     fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
-            smargs.parse_next().0?,
-            smargs.parse_next().0?
+            smargs.parse_next()?,
+            smargs.parse_next()?
         ))
     }
 }
@@ -878,9 +874,9 @@ where
     type Error = Error;
     fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
         Ok((
-            smargs.parse_next().0?,
-            smargs.parse_next().0?,
-            smargs.parse_next().0?,
+            smargs.parse_next()?,
+            smargs.parse_next()?,
+            smargs.parse_next()?,
         ))
     }
 }
@@ -1125,7 +1121,8 @@ mod tests {
         assert_eq!(a, 0);
         assert!(matches!(
             b.0.unwrap_err(),
-            Error::MissingRequired { expected_count: 2 },
+            Error::Dummy(boxed_err)
+                if boxed_err.is::<std::num::ParseIntError>(),
         ));
     }
 
@@ -1249,7 +1246,7 @@ mod tests {
             Break { err: Error::Smarg { .. }, .. }
         ));
         assert!(matches!(
-            match err { Break { err: Error::Smarg { kind, .. }, .. } => kind, _ => panic!("impossible"), },
+            match err.err { Error::Smarg { kind, .. } => kind, _ => panic!("impossible"), },
             ErrorKind::Duplicate,
         ));
     }
@@ -1269,7 +1266,7 @@ mod tests {
             Break{err: Error::Smarg { .. }, .. },
         ));
         assert!(matches!(
-            match err { Break { err: Error::Smarg { kind, .. }, ..} => kind, _ => panic!("impossible"), },
+            match err.err { Error::Smarg { kind, .. } => kind, _ => panic!("impossible"), },
             ErrorKind::MissingValue,
         ));
     }
@@ -1289,7 +1286,7 @@ mod tests {
             Break { .. },
         ));
         assert_eq!(
-            match err { Break { err: Error::UndefinedKey(x), .. } => x, _ => panic!("impossible"), },
+            match err.err { Error::UndefinedKey(x) => x, _ => panic!("impossible"), },
             "b".to_string(),
         );
     }
@@ -1306,11 +1303,12 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break{err: Error::Smarg { .. }, .. },
+            Break{err: Error::Dummy(_), .. },
         ));
         assert!(matches!(
-            match err { Break { err: Error::Smarg { ref kind, .. }, ..} => kind, _ => panic!("impossible"), },
-            ErrorKind::Parsing(..),
+            err.err,
+            Error::Dummy(boxed_err)
+                if boxed_err.is::<std::num::ParseIntError>(),
         ));
     }
 

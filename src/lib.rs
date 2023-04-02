@@ -190,7 +190,7 @@ macro_rules! smargs {
         , $input_args:expr $(,)?
     ) => {
         {
-            use terminal_toys::{select_unwrapping, Smargs, Smarg, SmargKind, SmargsError};
+            use terminal_toys::{unwrap, Smargs, Smarg, SmargKind, SmargsError};
             // Implement parsing into the given __custom__ (needed for passing
             // it to Smargs<Ts>) output type (with special Result-type when so
             // requested, because of the orphan rule/possibility of "upstream
@@ -200,7 +200,7 @@ macro_rules! smargs {
                 fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
                     Ok(
                         $container (
-                            $( select_unwrapping!( smargs, $kind ) ),+
+                            $( unwrap!( smargs, $kind ) ),+
                         )
                     )
                 }
@@ -214,13 +214,11 @@ macro_rules! smargs {
     };
 }
 
+/// Simply create the line for unwrapping the next value in `smargs`. Needed just for
+/// repeating the amount of values required.
 #[macro_export]
-macro_rules! select_unwrapping {
-    ( $smargs_:ident, SmargKind::Maybe ) => {
-        $smargs_.parse_next().0
-    };
-
-    ( $smargs_:ident, $unwrappable_kind:expr ) => {
-        $smargs_.parse_next().0?
+macro_rules! unwrap {
+    ( $smargs_:ident, $_kind:expr ) => {
+        $smargs_.parse_next()?
     };
 }
