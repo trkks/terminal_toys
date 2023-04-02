@@ -31,6 +31,12 @@ impl Display for NonEmptyString {
     }
 }
 
+impl From<StringIsEmptyError> for SmargsError {
+    fn from(value: StringIsEmptyError) -> Self {
+        SmargsError::dummy(value)
+    }
+}
+
 #[derive(Debug)]
 struct RegistrationInfo(String, usize, SmargsResult<NonEmptyString>, String, bool);
 
@@ -126,7 +132,7 @@ fn main() {
 
         let local_part = match local_part.0 {
             Ok(s) => Some(s),
-            Err(err@SmargsError::MissingRequired { .. }) => {
+            Err(err@(SmargsError::MissingRequired { .. } | SmargsError::Dummy(_))) => {
                 eprintln!("{}", err);
                 None
             },

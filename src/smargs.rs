@@ -22,10 +22,9 @@ impl<T: FromStr> List<T> {
 
 impl<T> std::str::FromStr for List<T>
 where
-    T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: error::Error + 'static,
+    T: FromStr,
 {
-    type Err = <T as std::str::FromStr>::Err;
+    type Err = <T as FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // TODO: Improve this HACK by, instead of using ',', searching for a
@@ -34,7 +33,7 @@ where
         // arguments.
         let mut xs = Vec::new();
         for x in s.split(',') {
-            xs.push(<T as std::str::FromStr>::from_str(x)?);
+            xs.push(<T as FromStr>::from_str(x)?);
         }
         Ok(List(xs))
     }
@@ -489,14 +488,14 @@ where
         };
 
         let return_value = <T as FromStr>::from_str(&value[0])
-            .map_err(|e| Error::Smarg {
+            .map_err(|e| e.into()/*::Smarg {
                 printable_arg: self.list[index].to_string(),
                 kind: ErrorKind::Parsing(
                     std::any::type_name::<T>(),
                     value[0].clone(),
-                    Box::new(e)
+                    e.to_string()
                 ),
-            });
+            }*/);
 
         // Update index.
         self.index += 1;
@@ -616,7 +615,6 @@ pub enum ErrorKind {
     Parsing(&'static str, String, Box<dyn error::Error>),
 }
 
-
 /// Struct containing short and long descriptions of a program and its
 /// arguments. The `short` message is preferred during generic error conditions
 /// and `long` when explicitly requesting for help.
@@ -649,9 +647,15 @@ pub enum Error {
     UndefinedArgument(String),
     UndefinedKey(String),
     Smarg { printable_arg: String, kind: ErrorKind },
-    // TEMPORARY: for user to pass any error message. TODO: Seriously look into
-    // the From-strategy.
-    Dummy(String),
+    /// Wrap a user-defined error.
+    Dummy(Box<dyn error::Error>),
+}
+
+impl Error {
+    /// Wrap the `error` in `Self::Dummy` by boxing it.
+    pub fn dummy<E: error::Error + 'static>(error: E) -> Self {
+        Self::Dummy(Box::new(error))
+    }
 }
 
 /// Select between generic or argument-specific error messages.
@@ -782,31 +786,55 @@ pub struct SmargsResult<T>(pub Result<T, Error>);
 /// "Newtrait" that allows implementing `FromStr` for `MyResult<T: FromStr>`
 /// that actually calls the method from `<T as FromStr>`.
 pub trait FromStr {
-    fn from_str(s: &str) -> Result<Self, Error> where Self: Sized;
+    type Err: Into<Error>;
+    fn from_str(s: &str) -> Result<Self, Self::Err> where Self: Sized;
 }
 
+/// Generic implementation for all types that implement `std::str::FromStr`.
 impl<T> FromStr for T
 where
     T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: error::Error + 'static,
+    <T as std::str::FromStr>::Err: Into<Error>,
 {
-    fn from_str(s: &str) -> Result<Self, Error> {
+    type Err = <T as std::str::FromStr>::Err;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         <Self as std::str::FromStr>::from_str(s)
-            .map_err(|e| todo!())
     }
 }
 
+/// Generic implementation for all types that implement `std::str::FromStr` but
+/// into the Result-wrapper for returning errors from parsing specific arguments.
 impl<T> FromStr for SmargsResult<T>
 where
     T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: error::Error + 'static,
+    <T as std::str::FromStr>::Err: Into<Error>,
 {
-    fn from_str(s: &str) -> Result<Self, Error> {
-        <T as std::str::FromStr>::from_str(s)
+    type Err = <T as std::str::FromStr>::Err;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        <T as FromStr>::from_str(s)
             .map(|x| SmargsResult(Ok(x)))
-            .map_err(|e| todo!())
     }
 }
+
+/* START: Implementations for errors from parsing strings into types supported by default */
+impl From<std::str::ParseBoolError> for Error {
+    fn from(value: std::str::ParseBoolError) -> Self {
+        todo!()
+    }
+}
+
+impl From<std::num::ParseIntError> for Error {
+    fn from(value: std::num::ParseIntError) -> Self {
+        todo!()
+    }
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(value: std::convert::Infallible) -> Self {
+        todo!()
+    }
+}
+/* END */
 
 /// This implementation supports adding a help message to an argumentless
 /// program.
@@ -834,15 +862,18 @@ where
 {
     type Error = Error;
     fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
-        Ok((smargs.parse_next().0?, smargs.parse_next().0?))
+        Ok((
+            smargs.parse_next().0?,
+            smargs.parse_next().0?
+        ))
     }
 }
 
 impl<T1, T2, T3> TryFrom<Smargs<Self>> for (T1, T2, T3)
 where
-    T1: std::str::FromStr, <T1 as std::str::FromStr>::Err: std::error::Error + 'static,
-    T2: std::str::FromStr, <T2 as std::str::FromStr>::Err: std::error::Error + 'static,
-    T3: std::str::FromStr, <T3 as std::str::FromStr>::Err: std::error::Error + 'static,
+    T1: FromStr,
+    T2: FromStr,
+    T3: FromStr,
 {
     type Error = Error;
     fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
