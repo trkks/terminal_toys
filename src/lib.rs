@@ -5,7 +5,8 @@ mod smargs;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-pub use smargs::{Smargs, Smarg, SmargKind, Break as SmargsBreak, Error as SmargsError};
+pub use smargs::{Smargs, Smarg, SmargKind, Break as SmargsBreak, SmargsResult, Error as SmargsError};
+
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -178,137 +179,48 @@ macro_rules! color_log {
     };
 }
 
-/// Convenience-macro for describing your program and its arguments and
-/// constructing a `Smargs` instance.
+/// Convenience-macro for describing your program and its expected arguments,
+/// constructing a `Smargs` instance and then parsing the actual arguments.
 #[macro_export]
 macro_rules! smargs {
     ( 
         $program_desc:literal
-        , $container:ident {
-            $( 
-                $field:ident:(
-                    $arg_desc:literal,
-                    $keys:expr,
-                    $sugar_type_kind:tt
-                    $(, $default:expr )?
-                )
-            ),+ $(,)?
-        }
+        , $( $help:expr )?
+        , $container:ident ( $( ($arg_desc:literal, $keys:expr, $kind:expr $(,)?) ),+ $(,)? )
+        , $input_args:expr $(,)?
     ) => {
         {
-            use std::{any, convert};
-            use terminal_toys::{Smargs, Smarg, SmargKind, SmargsError};
-            // Implement for the given __custom__ output type (because of the
-            // orphan rule) in order to parse from input.
-            impl convert::TryFrom<Smargs<$container>> for $container {
+            use terminal_toys::{select_unwrapping, Smargs, Smarg, SmargKind, SmargsError};
+            // Implement parsing into the given __custom__ (needed for passing
+            // it to Smargs<Ts>) output type (with special Result-type when so
+            // requested, because of the orphan rule/possibility of "upstream
+            // changes").
+            impl std::convert::TryFrom<Smargs<$container>> for $container {
                 type Error = SmargsError;
                 fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
-                    // The definition order matches this macro's and the field
-                    // names are order agnostic.
-                    let mut indices = 0..vec![$( $arg_desc ),+].len();
-                    Ok($container {
-                        // The turbofished type_ should not make any difference
-                        // but just in case.
-                        $( $field: terminal_toys::make_field_entry!( smargs, indices, $sugar_type_kind ) ),+
-
-                    })
+                    Ok(
+                        $container (
+                            $( select_unwrapping!( smargs, $kind ) ),+
+                        )
+                    )
                 }
             }
 
             let mut smargs = Smargs::<$container>::new($program_desc);
-            $( terminal_toys::push_smarg!( smargs, $arg_desc, $keys, $sugar_type_kind $(, $default )? ); )+
-            smargs
+            $( smargs.push(Smarg { desc: $arg_desc, keys: $keys.to_vec(), kind: $kind }); )+
+
+            smargs.parse($input_args)
         }
     };
 }
 
 #[macro_export]
-macro_rules! make_field_entry {
-    // The Result<T, SmargsError> -returning case.
-    ( $smargs_:ident, $indices:ident, {$type_:ty} ) => {
-        $smargs_.parse_nth::< $type_ >($indices.next().unwrap())
+macro_rules! select_unwrapping {
+    ( $smargs_:ident, SmargKind::Maybe ) => {
+        $smargs_.parse_next().0
     };
 
-    ( $smargs_:ident, $indices:ident, $type_:ty ) => {
-        $smargs_.parse_nth::< $type_ >($indices.next().unwrap())?
-    };
-    // TODO: Make this more general case work in order to support the [Type]-lists as well.
-    //( $smargs_:ident, $indices:ident, $sugar_type:tt ) => {
-    //    $smargs_.parse_nth::< terminal_toys::desugar_type!( $sugar_type ) >($indices.next().unwrap())
-    //};
-}
-
-/// Replace with the type this syntax-sugared input string represents (e.g., {T}
-/// => Result<T, SmargsError> or plain T => concrete type T).
-#[macro_export]
-macro_rules! desugar_type {
-    // Kind::Required (Result).
-    ( {$type_when_ok:ty} ) => {
-        Result<$type_when_ok, SmargsError>
-    };
-
-    // Any(?).
-    ( $type_:ty ) => {
-        $type_
-    };
-}
-
-#[macro_export]
-macro_rules! push_smarg {
-    ( $smargs:ident, $arg_desc:literal, $keys:expr, $sugar_type:tt $(, $default:tt )? ) => {
-        {
-            let keys = $keys.to_vec();
-            let mut default = Option::<&'static str>::None;
-            let mut kind = None;
-
-            let arg_is_bool = any::TypeId::of::< terminal_toys::desugar_type!( $sugar_type ) >() == any::TypeId::of::<bool>();
-
-            $(
-                // Prevent using default on a bool entirely (Note that
-                // this is a runtime check).
-                if arg_is_bool {
-                    panic!("boolean arguments default only to \"false\" and do so automatically (remove \"{}\").", $default);
-                }
-                default = Some($default);
-            )?
-
-            kind = Some( terminal_toys::desugar_kind!( arg_is_bool, terminal_toys::desugar_type!( $sugar_type ), default ) );
-
-            let kind = kind.expect("argument definition missing the type or default value");
-
-            $smargs.push(Smarg { desc: $arg_desc, keys, kind });
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! desugar_kind {
-    ( $arg_is_bool:expr, $_normal_type:ty $(, $default:expr )? ) => {
-        {
-            // Select kind based on passed type.
-            if $arg_is_bool {
-                // Booleans default to false in any case.
-                SmargKind::Flag
-            } else if let Some(value) = $( $default )? {
-                let default = value.to_owned();
-                // TODO Check that default is of type type_ e.g. by
-                // trying to parse it here?
-                SmargKind::Optional(value)
-            } else {
-                SmargKind::Required
-            }
-        }
-    };
-
-    ( $_arg_is_bool:expr, [$_type:ty] $(, $_default:expr )? ) => {
-        {
-            SmargKind::List(0)
-        }
-    };
-
-    ( $_arg_is_bool:expr, [$_type:ty; $n:expr] $(, $_default:expr )? ) => {
-        {
-            SmargKind::List($n)
-        }
+    ( $smargs_:ident, $unwrappable_kind:expr ) => {
+        $smargs_.parse_next().0?
     };
 }
