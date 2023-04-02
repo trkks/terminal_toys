@@ -2,9 +2,11 @@ use terminal_toys::{smargs, SmargsBreak, SmargsResult, SmargsError};
 use std::{str::FromStr, fmt::Display};
 
 
+/// A custom type to parse from an argument.
 #[derive(Debug)]
 struct NonEmptyString(String);
 
+/// A custom error to return when parsing fails.
 #[derive(Debug)]
 struct StringIsEmptyError;
 impl Display for StringIsEmptyError {
@@ -14,6 +16,7 @@ impl Display for StringIsEmptyError {
 }
 impl std::error::Error for StringIsEmptyError { }
 
+/// Bringing the two, custom type and parsing error together.
 impl FromStr for NonEmptyString {
     type Err = StringIsEmptyError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -25,18 +28,15 @@ impl FromStr for NonEmptyString {
     }
 }
 
-impl Display for NonEmptyString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
+/// Choosing how the parsing error will be turned into the common return type
+/// (TODO: is this boilerplate?).
 impl From<StringIsEmptyError> for SmargsError {
     fn from(value: StringIsEmptyError) -> Self {
         SmargsError::dummy(value)
     }
 }
 
+/// Custom output type.
 #[derive(Debug)]
 struct RegistrationInfo(String, usize, SmargsResult<NonEmptyString>, String, bool);
 
@@ -142,7 +142,7 @@ fn main() {
             NonEmptyString(format!("{}.{}", name, age))
         });
 
-        format!("{}@{}.{}", local_part, domain, tld)
+        format!("{}@{}.{}", local_part.0, domain, tld)
             .replace(' ', ".")
             .to_lowercase()
     };
