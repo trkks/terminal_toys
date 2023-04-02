@@ -11,20 +11,23 @@ Thingamajigs to make command-line programs more user- and developer-friendly.
 
 ### Example:
 ```rust
-use terminal_toys::{Smargs, ArgType};
-let program_args = vec!["repeat", "-v", "--amount", "3", "foo bar"];
+struct MyInput { repeats: usize, string: String, verbose: bool };
+let program_args = vec!["repeat.exe", "-v", "--amount", "3", "foo bar"];
 
-let (n, s, verbose) : (usize, String, bool) =
-  Smargs::builder("Repeat a string!")
-    .required(["amount"], "Amount of repeats")
-    .required([], "The string to repeat")
-    .optional(["v", "verbose"], "Print information about the result", ArgType::False)
+let MyInput { repeats, string, verbose } = terminal_toys::smargs!(
+      "Repeat!",
+      MyInput {
+        repeats:("Amount of repeats",      vec!["amount"],       usize),
+        string: ("The string to repeat",   vec![],               String),
+        verbose:("Print more information", vec!["v", "verbose"], bool)
+      }
+    )
     .parse(program_args.into_iter().map(String::from))?;
 
-assert_eq!(n, 3);
-assert_eq!(s, "foo bar");
+assert_eq!(repeats, 3);
+assert_eq!(string, "foo bar");
 assert!(verbose);
-return Ok::<(), terminal_toys::smargs::Error>(())
+# return Ok::<(), terminal_toys::SmargsBreak>(())
 ```
 
 ## ProgressBar
