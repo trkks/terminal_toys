@@ -540,7 +540,7 @@ impl Error {
 impl fmt::Display for Break {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f, "Parsing interrupted because of {}",
+            f, "Parsing interrupted because {}",
             match self.err {
                 // Argument-specific error.
                 Error::Smarg { .. } => self.err.to_string(),
@@ -585,8 +585,6 @@ impl fmt::Display for Error {
         write!(f, "{}", msg)
     }
 }
-
-impl error::Error for Error {}
 
 /// Contains information about a single _definition_ (or declaration?) of an
 /// argument i.e., this is not an abstraction for the concrete things that a
@@ -718,26 +716,14 @@ where
 
 }
 
-/* START: Implementations for errors from parsing strings into types supported by default */
-// TODO: Couldn't these really be implemented with constrained generics?
-impl From<std::str::ParseBoolError> for Error {
-    fn from(value: std::str::ParseBoolError) -> Self {
+/// This generic implementation prevents implementing `std::error::Error` for
+/// `smargs::Error`, but probably a a smaller price to pay than having to
+/// manually add support for each.
+impl<E: error::Error + 'static> From<E> for Error {
+    fn from(value: E) -> Self {
         Self::dummy(value)
     }
 }
-
-impl From<std::num::ParseIntError> for Error {
-    fn from(value: std::num::ParseIntError) -> Self {
-        Self::dummy(value)
-    }
-}
-
-impl From<std::convert::Infallible> for Error {
-    fn from(value: std::convert::Infallible) -> Self {
-        Self::dummy(value)
-    }
-}
-/* END */
 
 /// This implementation supports adding a help message to an argumentless
 /// program.

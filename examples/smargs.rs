@@ -14,6 +14,8 @@ impl Display for StringIsEmptyError {
         write!(f, "empty string")
     }
 }
+/// The `Err` variant in `SmargsResult` requires implementing
+/// `std::error::Error` for using custom types.
 impl std::error::Error for StringIsEmptyError { }
 
 /// Bringing the two, custom type and parsing error together.
@@ -25,14 +27,6 @@ impl FromStr for NonEmptyString {
         } else {
             Err(StringIsEmptyError)
         }
-    }
-}
-
-/// Choosing how the parsing error will be turned into the common return type
-/// (TODO: is this boilerplate?).
-impl From<StringIsEmptyError> for SmargsError {
-    fn from(value: StringIsEmptyError) -> Self {
-        SmargsError::dummy(value)
     }
 }
 
@@ -51,7 +45,7 @@ fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, SmargsBre
                 ["e"],
                 SmargKind::Maybe
             ),
-            ("Email address domain",              ["d"],             SmargKind::Optional("coolnewz")),
+            ("Email address domain",              ["d"],             SmargKind::Optional("coolnewz.com")),
             ("Opt-out from receiving newsletter", ["no-newsletter"], SmargKind::Flag),
         ),
     )
