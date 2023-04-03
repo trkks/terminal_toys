@@ -34,7 +34,8 @@ pub struct Smargs<Ts> {
     list: Vec<Smarg>,
     /// Mapping of keys to to positions.
     map: HashMap<String, usize>,
-    /// Made-up field required for storing the output type `Ts`.
+    /// NOTE: This is here in order to support the `smargs`-macro implementing
+    /// `TryFrom<Smargs<_>> for CustomOutput`.
     output: PhantomData<Ts>,
     /// Field where the given arguments are stored for parsing later.
     values: Vec<Vec<String>>,
@@ -422,7 +423,7 @@ where
         // Save and check for duplicate keys in definition.
         for key in &smarg.keys {
             if self.map.insert(key.to_string(), handle).is_some() {
-                panic!("Duplicate key defined: '{}'", key);
+                panic!("duplicate key defined: '{}'", key);
             }
         }
 
@@ -445,7 +446,7 @@ where
         const START_CHARACTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         const POST_START_CHARACTERS: &[u8] = b"-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         if key.is_empty() {
-            return Err(format!("a key must not be empty"));
+            return Err("a key must not be empty".to_owned());
         }
         if key.contains(' ') {
             return Err(format!("a key must not contain spaces: '{}'", key));
@@ -540,7 +541,7 @@ impl Error {
 impl fmt::Display for Break {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f, "Parsing interrupted because {}",
+            f, "Interrupted because {}",
             match self.err {
                 // Argument-specific error.
                 Error::Smarg { .. } => self.err.to_string(),
@@ -555,26 +556,26 @@ impl fmt::Display for Break {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
-            Self::Help => "Help".to_owned(),
+            Self::Help => "help".to_owned(),
             Self::MissingRequired { expected_count: expected } => {
                 // TODO What about "required _at least_ of X" in case of (future)
                 // list-type arguments?
-                format!("Not enough arguments (expected {}).", expected)
+                format!("not enough arguments (expected {}).", expected)
             },
             Self::UndefinedArgument(arg) => {
-                format!("Extra argument '{}'", arg)
+                format!("extra argument '{}'", arg)
             },
             // TODO Suggest similar existing arguments in case of user typo.
-            Self::UndefinedKey(key) => format!("Option '{}' does not exist", key),
+            Self::UndefinedKey(key) => format!("option '{}' does not exist", key),
             Self::Smarg { printable_arg, kind } => format!(
                 "{}. Usage: {}",
                 match kind {
                     // TODO Inform how many times the argument was illegally repeated.
-                    ErrorKind::Duplicate => "Too many entries of this argument".to_owned(),
+                    ErrorKind::Duplicate => "too many entries of this argument".to_owned(),
                     // TODO Elaborate on the type of value.
-                    ErrorKind::MissingValue => "Option key used but missing the value".to_owned(),
+                    ErrorKind::MissingValue => "option key used but missing the value".to_owned(),
                     ErrorKind::Parsing(tname, input, e) => format!(
-                        "Failed to parse the type {} from input '{}': {}",
+                        "failed to parse the type {} from input '{}': {}",
                         tname, input, e
                     ),
                 },
