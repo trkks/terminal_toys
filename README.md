@@ -2,27 +2,27 @@
 Thingamajigs to make command-line programs more user- and developer-friendly.
 
 ## Smargs
-- Easily parse program arguments based on your definition into required types.
-- Return automatically generated help messages when for example:
-  - Argument could not be parsed correctly
-  - Not enough or too many arguments are given
-  - Duplicate or undefined option keys are used
-  - ~~Help is requested with the `--help` option~~
+- Parse program arguments into required types based on your definition.
+- Show generated help messages in fitting situations:
+  - An argument could not be parsed correctly
+  - Not enough or too many arguments received
+  - Duplicates of or undefined option keys used
+  - Help is requested with the `-h/--help` options
 
 ### Example:
 ```rust
 struct MyInput { repeats: usize, string: String, verbose: bool };
 let program_args = vec!["echon", "-v", "--amount", "3", "foo bar"];
 
-let MyInput { repeats, string, verbose } = terminal_toys::smargsparse!(
+let MyInput { repeats, string, verbose } = terminal_toys::smargs!(
   "Echo a string N times",
   MyInput {
     repeats:("Amount of echoes",       vec!["amount"],       terminal_toys::SmargKind::Required),
     string: ("The string to echo",     vec![],               terminal_toys::SmargKind::Required),
     verbose:("Print more information", vec!["v", "verbose"], terminal_toys::SmargKind::Flag)
   },
-  program_args.into_iter().map(String::from)
-)?;
+)
+.parse(program_args.into_iter().map(String::from))?;
 
 assert_eq!(repeats, 3);
 assert_eq!(string, "foo bar");

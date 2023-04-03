@@ -1,4 +1,4 @@
-use terminal_toys::{smargsparse, SmargsBreak, SmargsResult, SmargsError};
+use terminal_toys::{smargs, SmargsBreak, SmargsResult, SmargsError};
 use std::{str::FromStr, fmt::Display};
 
 
@@ -41,7 +41,7 @@ impl From<StringIsEmptyError> for SmargsError {
 struct RegistrationInfo(String, usize, SmargsResult<NonEmptyString>, String, bool);
 
 fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, SmargsBreak> {
-    smargsparse!(
+    smargs!(
         "Register for a service",
         RegistrationInfo(
             ("Your full name",                    [],                SmargKind::Required),
@@ -54,8 +54,9 @@ fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, SmargsBre
             ("Email address domain",              ["d"],             SmargKind::Optional("coolnewz")),
             ("Opt-out from receiving newsletter", ["no-newsletter"], SmargKind::Flag),
         ),
-        args,
     )
+    .help_default()
+    .parse(args)
 }
 
 fn use_example_args() -> bool {
@@ -77,7 +78,7 @@ fn main() {
         "-a",
         "26",
         "-d",
-        "hatch",
+        "hatch.com",
         "Matt Myman",
     ]
     .into_iter()
@@ -122,7 +123,7 @@ fn main() {
     }
 
     let user_email = {
-        let mut split = domain.rsplit_once('.');
+        let split = domain.rsplit_once('.');
         let (domain, tld) = match split {
             Some((l, r)) if l.len() > 0 && r.len() > 0 => (l, r),
             Some((l, _)) if l.len() > 0 => (l, "com"),

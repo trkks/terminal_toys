@@ -121,15 +121,16 @@ macro_rules! color_log {
 /// String>` into requested types:
 /// ```
 /// struct Input(usize, bool, String);
-/// let Input(foo, bar, baz) = terminal_toys::smargsparse!(
+/// let Input(foo, bar, baz) = terminal_toys::smargs!(
 ///     "An example",
 ///     Input(
 ///         ("Foo", [], terminal_toys::SmargKind::Optional("42")),
 ///         ("Bar", ["b"], terminal_toys::SmargKind::Flag),
 ///         ("Baz", ["z", "baz"], terminal_toys::SmargKind::Required),
 ///     ),
-///     vec!["x", "Bazbaz"].into_iter().map(String::from)
-/// ).unwrap();
+/// )
+/// .parse(vec!["x", "Bazbaz"].into_iter().map(String::from))
+/// .unwrap();
 /// 
 /// assert_eq!(foo, 42_usize);
 /// assert_eq!(bar, false);
@@ -138,7 +139,7 @@ macro_rules! color_log {
 /// Structs with named fields are also supported:
 /// ```
 /// # fn main() -> Result<(), String> {
-/// use terminal_toys::{smargsparse, List, SmargKind as Sk};
+/// use terminal_toys::{smargs, List, SmargKind as Sk};
 ///
 /// struct RegistrationInfo {
 ///     names: List<String>,
@@ -153,9 +154,9 @@ macro_rules! color_log {
 ///    "-a", "26",
 ///    "-d", "hatch",
 ///    "Matt", "-n", "Myman", "-n", "Jr"
-/// ].into_iter().map(String::from);
+/// ];
 /// 
-/// let RegistrationInfo { names, age, domain, no_news } = smargsparse!(
+/// let RegistrationInfo { names, age, domain, no_news } = smargs!(
 ///     "Register for service",
 ///     RegistrationInfo {
 ///         no_news:("Opt-out from receiving newsletter",     ["no-newsletter"], Sk::Flag),
@@ -163,8 +164,9 @@ macro_rules! color_log {
 ///         domain: ("Email address domain",                  ["d"],             Sk::Optional("getspam")),
 ///         age:    ("Your age",                              ["a", "age"],      Sk::Required)
 ///     },
-///     args
-/// ).map_err(|e| e.to_string())?;
+/// )
+/// .parse(args.into_iter().map(String::from))
+/// .map_err(|e| e.to_string())?;
 /// 
 /// let mut newsletter_subscribers = vec![];
 ///
@@ -194,7 +196,7 @@ macro_rules! color_log {
 /// value.
 /// ```
 /// # fn main() -> Result<(), String> {
-/// use terminal_toys::{smargsparse, List, SmargKind as Sk};
+/// use terminal_toys::{smargs, List, SmargKind as Sk};
 ///
 /// struct RegistrationInfo {
 ///     names: List<String>,
@@ -203,9 +205,9 @@ macro_rules! color_log {
 ///     no_news: bool,
 /// }
 /// 
-/// let args = vec!["register.exe", "Matt Myman", "26"].into_iter().map(String::from);
+/// let args = vec!["register.exe", "Matt Myman", "26"];
 /// 
-/// let RegistrationInfo { names, age, domain, no_news } = smargsparse!(
+/// let RegistrationInfo { names, age, domain, no_news } = smargs!(
 ///     "Register for service",
 ///     RegistrationInfo {
 ///         no_news:("Opt-out from receiving newsletter",     ["no-newsletter"], Sk::Flag),
@@ -213,8 +215,9 @@ macro_rules! color_log {
 ///         domain: ("Email address domain",                  ["d"],             Sk::Optional("getspam")),
 ///         age:    ("Your age",                              ["a", "age"],      Sk::Required)
 ///     },
-///     args
-/// ).map_err(|e| e.to_string())?;
+/// )
+/// .parse(args.into_iter().map(String::from))
+/// .map_err(|e| e.to_string())?;
 /// 
 /// assert!(!no_news);
 /// assert_eq!(names.0, vec!["Matt Myman"]);
@@ -223,12 +226,8 @@ macro_rules! color_log {
 /// # Ok(()) }
 /// ```
 #[macro_export]
-macro_rules! smargsparse {
-    (   // TODO: How to define Help?
-        $program_desc:literal
-        , $container_name:ident $container:tt
-        , $input_args:expr $(,)?
-    ) => {
+macro_rules! smargs {
+    ( $program_desc:literal , $container_name:ident $container:tt $(,)? ) => {
         {
             use terminal_toys::{container_parse, unwrap_parse, container_push, unwrap_push, Smargs, Smarg, SmargKind, SmargsError};
             // Implement parsing into the given __custom__ (needed for passing
@@ -247,7 +246,7 @@ macro_rules! smargsparse {
             let mut smargs = Smargs::<$container_name>::new($program_desc);
             container_push!( smargs, $container );
 
-            smargs.parse($input_args)
+            smargs
         }
     };
 }
