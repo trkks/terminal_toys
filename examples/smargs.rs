@@ -80,26 +80,21 @@ fn main() {
 
     let RegistrationInfo(name, age, local_part, domain, no_subscribe) = {
         // Catch this error in order to make demonstration of actual parsing easier.
-        match match parse(std::env::args()) {
-            missing_args@Err(SmargsBreak { err: SmargsError::MissingRequired { .. }, .. }) => {
-                if use_example_args() {
-                    parse(example_args)
-                } else {
-                    // Let the error continue on.
-                    missing_args
-                }
-            }
-            result_of_parsing => result_of_parsing,
-        } {
+        let x = match parse(std::env::args()) {
+            Err(SmargsBreak { err: SmargsError::MissingRequired { .. }, .. }) if use_example_args() => {
+                // Use some hard-coded args for demonstration.
+                parse(example_args).expect("bad example args")
+            },
             Err(e) => {
                 eprintln!("{}", e);
-                std::process::exit(1);
+                std::process::exit(1)
             },
-            Ok(x) => {
-                println!("You passed {:?}", x);
-                x
-            }
-        }
+            Ok(x) => x,
+        };
+
+        println!("You passed {:?}", x);
+
+        x
     };
 
     if age < 18 {
@@ -125,16 +120,16 @@ fn main() {
         };
 
         let local_part = match local_part.0 {
-            Ok(s) => Some(s),
-            Err(err@(SmargsError::MissingRequired { .. } | SmargsError::Dummy(_))) => {
-                eprintln!("{}", err);
-                None
+            Err(SmargsError::MissingRequired { .. } | SmargsError::Dummy(_)) => {
+                    eprintln!("Constructing default local part");
+                    NonEmptyString(format!("{}.{}", name, age))
             },
-            Err(err) => panic!("{}", err),
-        }.unwrap_or_else(|| {
-            eprintln!("Constructing default local part");
-            NonEmptyString(format!("{}.{}", name, age))
-        });
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            },
+            Ok(x) => x,
+        };
 
         format!("{}@{}.{}", local_part.0, domain, tld)
             .replace(' ', ".")
