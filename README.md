@@ -11,15 +11,17 @@ Thingamajigs to make command-line programs more user- and developer-friendly.
 
 ### Example:
 ```rust
+use terminal_toys::{smärgs, smargs};
+
 struct MyInput { repeats: usize, string: String, verbose: bool };
 let program_args = vec!["echon", "-v", "--amount", "3", "foo bar"];
 
-let MyInput { repeats, string, verbose } = terminal_toys::smargs!(
+let MyInput { repeats, string, verbose } = terminal_toys::smärgs!(
   "Echo a string N times",
   MyInput {
-    repeats:("Amount of echoes",       vec!["amount"],       terminal_toys::SmargKind::Required),
-    string: ("The string to echo",     vec![],               terminal_toys::SmargKind::Required),
-    verbose:("Print more information", vec!["v", "verbose"], terminal_toys::SmargKind::Flag)
+    repeats:("Amount of echoes",       vec!["amount"],       smargs::Kind::Required),
+    string: ("The string to echo",     vec![],               smargs::Kind::Required),
+    verbose:("Print more information", vec!["v", "verbose"], smargs::Kind::Flag)
   },
 )
 .parse(program_args.into_iter().map(String::from))?;
@@ -33,7 +35,7 @@ for i in 0..repeats {
   if verbose { eprintln!("{} repeats left", repeats - (i + 1)); }
 }
 
-# return Ok::<(), terminal_toys::SmargsBreak>(())
+# return Ok::<(), smargs::Break>(())
 ```
 
 ## ProgressBar

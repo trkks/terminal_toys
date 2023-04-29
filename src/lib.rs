@@ -1,11 +1,10 @@
 pub mod snake;
 pub mod progress_bar;
 pub mod spinner;
-mod smargs;
+pub mod smargs;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-pub use smargs::{Smargs, List, Smarg, SmargKind, Break as SmargsBreak, SmargsResult, Error as SmargsError};
 
 
 #[doc = include_str!("../README.md")]
@@ -115,12 +114,12 @@ macro_rules! color_log {
 /// # Usage
 /// ```
 /// struct Input(usize, bool, String);
-/// let Input(foo, bar, baz) = terminal_toys::smargs!(
+/// let Input(foo, bar, baz) = terminal_toys::smärgs!(
 ///     "Example description",
 ///     Input(
-///         ("Is Foo",   ["f", "foo"], terminal_toys::SmargKind::Optional("42")),
-///         ("Sets Bar", ["b"],        terminal_toys::SmargKind::Flag),
-///         ("Uses Baz", [],           terminal_toys::SmargKind::Required),
+///         ("Is Foo",   ["f", "foo"], terminal_toys::smargs::Kind::Optional("42")),
+///         ("Sets Bar", ["b"],        terminal_toys::smargs::Kind::Flag),
+///         ("Uses Baz", [],           terminal_toys::smargs::Kind::Required),
 ///     ),
 /// )
 /// .parse(vec!["x", "-b", "Bazbaz"].into_iter().map(String::from))
@@ -130,7 +129,10 @@ macro_rules! color_log {
 /// assert_eq!(bar, true);
 /// assert_eq!(baz, "Bazbaz".to_owned());
 /// ```
-/// # Description
+/// # `smärgs`
+/// Named so in order to deal with exporting module with same name (and it is
+/// also funny haha).
+/// 
 /// Convenience-macro for describing your program and its expected arguments,
 /// constructing a `Smargs` instance and then parsing the actual arguments.
 ///
@@ -141,7 +143,7 @@ macro_rules! color_log {
 /// Using a struct with named fields:
 /// ```
 /// # fn main() -> Result<(), String> {
-/// use terminal_toys::{smargs, List, SmargKind as Sk};
+/// use terminal_toys::{smärgs, smargs::{List, Kind as Sk}};
 ///
 /// struct RegistrationInfo {
 ///     names: List<String>,
@@ -158,7 +160,7 @@ macro_rules! color_log {
 ///    "Matt", "-n", "Myman", "-n", "Jr"
 /// ];
 /// 
-/// let RegistrationInfo { names, age, domain, no_news } = smargs!(
+/// let RegistrationInfo { names, age, domain, no_news } = smärgs!(
 ///     "Register for service",
 ///     RegistrationInfo {
 ///         no_news:("Opt-out from receiving newsletter",     ["no-newsletter"], Sk::Flag),
@@ -198,7 +200,7 @@ macro_rules! color_log {
 /// value.
 /// ```
 /// # fn main() -> Result<(), String> {
-/// use terminal_toys::{smargs, List, SmargKind as Sk};
+/// use terminal_toys::{smärgs, smargs::{List, Kind as Sk}};
 ///
 /// struct RegistrationInfo {
 ///     names: List<String>,
@@ -209,7 +211,7 @@ macro_rules! color_log {
 /// 
 /// let args = vec!["register.exe", "Matt Myman", "26"];
 /// 
-/// let RegistrationInfo { names, age, domain, no_news } = smargs!(
+/// let RegistrationInfo { names, age, domain, no_news } = smärgs!(
 ///     "Register for service",
 ///     RegistrationInfo {
 ///         no_news:("Opt-out from receiving newsletter",     ["no-newsletter"], Sk::Flag),
@@ -228,16 +230,22 @@ macro_rules! color_log {
 /// # Ok(()) }
 /// ```
 #[macro_export]
-macro_rules! smargs {
+macro_rules! smärgs {
     ( $program_desc:literal , $container_name:ident $container:tt $(,)? ) => {
         {
-            use terminal_toys::{container_parse, unwrap_parse, container_push, unwrap_push, Smargs, Smarg, SmargKind, SmargsError};
+            use terminal_toys::{
+                container_parse,
+                unwrap_parse,
+                container_push,
+                unwrap_push,
+                smargs::{Smargs, Smarg, Kind, Error}
+            };
             // Implement parsing into the given __custom__ (needed for passing
             // it to Smargs<Ts>) output type (with special Result-type when so
             // requested, because of the orphan rule/possibility of "upstream
             // changes").
             impl std::convert::TryFrom<Smargs<$container_name>> for $container_name {
-                type Error = SmargsError;
+                type Error = Error;
                 fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
                     Ok(
                         container_parse!( smargs, $container_name $container )

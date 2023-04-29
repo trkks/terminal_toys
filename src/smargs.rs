@@ -4,6 +4,7 @@ use std::error;
 use std::fmt;
 use std::fmt::Display;
 use std::iter::{self, FromIterator};
+use std::result::Result as StdResult;
 
 use std::marker::PhantomData;
 
@@ -49,7 +50,7 @@ where
     /// definitions in tuple form.
     pub fn with_definition<const N: usize>(
         desc: &'static str,
-        definition: [(&'static str, Vec<&'static str>, SmargKind); N]
+        definition: [(&'static str, Vec<&'static str>, Kind); N]
     ) -> Self {
         let mut smargs = Smargs::new(desc);
         for (s, ks, k) in definition {
@@ -64,7 +65,7 @@ where
     /// 
     /// Note that the name of the program/command is assumed to be the first
     /// item in `args`.
-    pub fn parse(mut self, mut args: impl Iterator<Item = String>) -> Result<Ts, Break>
+    pub fn parse(mut self, mut args: impl Iterator<Item = String>) -> StdResult<Ts, Break>
     {
         if let Some(name) = args.next() {
             self.name = name;
@@ -83,17 +84,17 @@ where
         {
             value.replace(
                 match self.list[i].kind {
-                    SmargKind::Optional(default) => vec![default.to_owned()],
-                    SmargKind::Flag | SmargKind::Help => vec![false.to_string()],
-                    SmargKind::List(0) => vec![],
+                    Kind::Optional(default) => vec![default.to_owned()],
+                    Kind::Flag | Kind::Help => vec![false.to_string()],
+                    Kind::List(0) => vec![],
                     // TODO: A macro that basically expands to Self::is_required
                     // would be gooder here.
-                    SmargKind::List(_) | SmargKind::Required => {
+                    Kind::List(_) | Kind::Required => {
                         let expected_count = self.list.iter().filter(|x| Self::is_required(x)).count();
                         return Err(help.short_break(Error::MissingRequired { expected_count }))
                     },
                     // TODO: Is this right?
-                    SmargKind::Maybe => vec![],
+                    Kind::Maybe => vec![],
                 }
             );
         }
@@ -112,7 +113,7 @@ where
     }
 
     /// Creates `T` based on a call to `std::env::args`.
-    pub fn from_env(self) -> Result<Ts, Break> {
+    pub fn from_env(self) -> StdResult<Ts, Break> {
         self.parse(std::env::args())
     }
 
@@ -126,7 +127,7 @@ where
     /// parsing will be interrupted and return an automatically generated help
     /// message.
     pub fn help_keys(mut self, keys: Vec<&'static str>) -> Self {
-        self.push(Smarg { desc: "Show this help message", keys, kind: SmargKind::Help });
+        self.push(Smarg { desc: "Show this help message", keys, kind: Kind::Help });
 
         self
     }
@@ -140,7 +141,7 @@ where
             self.list
                 .iter()
                 // Do _not_ include Help in usage list.
-                .filter_map(|x| (!matches!(x.kind, SmargKind::Help)).then_some(x.kind.to_string()))
+                .filter_map(|x| (!matches!(x.kind, Kind::Help)).then_some(x.kind.to_string()))
                 .zip(iter::repeat(' '))
                 .fold(
                     String::new(),
@@ -149,7 +150,7 @@ where
         );
 
         let mut short = usage.clone();
-        if let Smarg { keys, kind: SmargKind::Help, .. } = &self.list[0] {
+        if let Smarg { keys, kind: Kind::Help, .. } = &self.list[0] {
             short.push_str(&format!(
                 "\nTry '{} {}' for more information.",
                 self.name,
@@ -199,7 +200,7 @@ where
         &self,
         args: impl Iterator<Item = String>,
         help: &Help
-    ) -> Result<Vec<Option<Vec<String>>>, Break> {
+    ) -> StdResult<Vec<Option<Vec<String>>>, Break> {
         // TODO: A stack would work just as well (i.e., refactor to use Vec
         // instead -> avoids confusion as to why exactly use VecDeque).
         let mut args = VecDeque::from_iter(args);
@@ -288,13 +289,13 @@ where
                     let smarg = self.list.get(key_matched_index).expect("position not found");
 
                     match smarg.kind {
-                        SmargKind::Help => {
+                        Kind::Help => {
                             // In case help is requested in the arguments e.g.
                             // in the form of `--help`, interrupt the parsing
                             // here and return the more detailed help-message.
                             return Err(help.long_break(Error::Help))
                         },
-                        SmargKind::Flag => {
+                        Kind::Flag => {
                             if values[key_matched_index].replace(vec![true.to_string()]).is_some() {
                                 // TODO: Wouldn't this more specifically be
                                 // "Error::DuplicateFlag(arg)"?
@@ -304,7 +305,7 @@ where
                                 );
                             }
                         },
-                        SmargKind::List(_min) => {
+                        Kind::List(_min) => {
                             // This case here is why `values` contains Vec<String>'s.
                             if let Some(list) = values[key_matched_index].as_mut() {
                                 if let Some(value) = args.pop_front() {
@@ -351,7 +352,7 @@ where
     /// implementations or `smargs` macro!
     /// 
     /// Parse into the type `T` the next value of arg defined in running order.
-    pub fn parse_next<T>(&mut self) -> Result<T, Error>
+    pub fn parse_next<T>(&mut self) -> StdResult<T, Error>
     where
         T: FromStr,
     {
@@ -365,7 +366,7 @@ where
                 expected_count: self
                     .list
                     .iter()
-                    .filter(|x| matches!(x, Smarg { kind: SmargKind::Required, ..}))
+                    .filter(|x| matches!(x, Smarg { kind: Kind::Required, ..}))
                     .count()
             })
         {
@@ -403,8 +404,8 @@ where
         Self::validate_key_names(&smarg.keys);
 
         // Get the correct index to insert (not push) into.
-        let handle = if let SmargKind::Help = smarg.kind {
-            if let Some(Smarg { kind: SmargKind::Help, .. }) = self.list.get(0) {
+        let handle = if let Kind::Help = smarg.kind {
+            if let Some(Smarg { kind: Kind::Help, .. }) = self.list.get(0) {
                 panic!("the help argument can not be defined more than once");
             }
             // The zeroth index is reserved for Help so all the others will be
@@ -442,7 +443,7 @@ where
         }
     }
 
-    fn validate_key_name(key: &str) -> Result<(), String> {
+    fn validate_key_name(key: &str) -> StdResult<(), String> {
         const START_CHARACTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         const POST_START_CHARACTERS: &[u8] = b"-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         if key.is_empty() {
@@ -479,7 +480,7 @@ where
 
     /// Return if the definition represents a required argument.
     fn is_required(smarg: &Smarg) -> bool {
-        matches!(smarg.kind, SmargKind::Required | SmargKind::List(1..))
+        matches!(smarg.kind, Kind::Required | Kind::List(1..))
     }
 }
 
@@ -594,7 +595,7 @@ impl fmt::Display for Error {
 pub struct Smarg {
     pub desc: &'static str,
     pub keys: Vec<&'static str>,
-    pub kind: SmargKind,
+    pub kind: Kind,
 }
 
 impl Display for Smarg {
@@ -611,11 +612,11 @@ impl Display for Smarg {
         };
 
         let note = match &self.kind {
-            SmargKind::Required => "<required value>".to_owned(),
-            SmargKind::Optional(default) => format!("<value OR '{}'>", default),
-            SmargKind::Flag | SmargKind::Help => "Negated by default".to_owned(),
-            SmargKind::List(n) => format!("List of {} or more values", n),
-            SmargKind::Maybe => "<value OR ??>".to_owned(),
+            Kind::Required => "<required value>".to_owned(),
+            Kind::Optional(default) => format!("<value OR '{}'>", default),
+            Kind::Flag | Kind::Help => "Negated by default".to_owned(),
+            Kind::List(n) => format!("List of {} or more values", n),
+            Kind::Maybe => "<value OR ??>".to_owned(),
         };
 
         write!(f, "{}{}", keystring, note)
@@ -624,7 +625,7 @@ impl Display for Smarg {
 
 /// Describes the argument and how it is supplied.
 #[derive(Debug, Clone)]
-pub enum SmargKind {
+pub enum Kind {
     /// Special flag for requesting the help message.
     Help,
     /// An argument which __needs__ to be provided by the user.
@@ -644,7 +645,7 @@ pub enum SmargKind {
     Maybe,
 }
 
-impl fmt::Display for SmargKind {
+impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", match self {
             Self::Help        => "(HELP)".to_owned(),
@@ -659,13 +660,13 @@ impl fmt::Display for SmargKind {
 }
 
 #[derive(Debug)]
-pub struct SmargsResult<T>(pub Result<T, Error>);
+pub struct Result<T>(pub StdResult<T, Error>);
 
 /// "Newtrait" that allows implementing `FromStr` for `MyResult<T: FromStr>`
 /// that actually calls the method from `<T as FromStr>`.
 pub trait FromStr {
     type Err: Into<Error>;
-    fn from_str(s: &str) -> Result<Self, Self::Err> where Self: Sized;
+    fn from_str(s: &str) -> StdResult<Self, Self::Err> where Self: Sized;
 }
 
 /// Generic implementation for all types that implement `std::str::FromStr`.
@@ -675,24 +676,24 @@ where
     <T as std::str::FromStr>::Err: Into<Error>,
 {
     type Err = <T as std::str::FromStr>::Err;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> StdResult<Self, Self::Err> {
         <Self as std::str::FromStr>::from_str(s)
     }
 }
 
 /// Generic implementation for all types that implement `std::str::FromStr` but
 /// into the Result-wrapper for returning errors from parsing specific arguments.
-impl<T> FromStr for SmargsResult<T>
+impl<T> FromStr for Result<T>
 where
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: Into<Error>,
 {
     type Err = std::convert::Infallible;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> StdResult<Self, Self::Err> {
         <T as FromStr>::from_str(s)
-            .map(|x| SmargsResult(Ok(x)))
+            .map(|x| Result(Ok(x)))
             // Wrap the error inside.
-            .or_else(|e| Ok(SmargsResult(Err(e.into()))))
+            .or_else(|e| Ok(Result(Err(e.into()))))
     }
 }
 
@@ -703,7 +704,7 @@ where
 {
     type Err = <T as FromStr>::Err;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> where Self: Sized {
+    fn from_str(s: &str) -> StdResult<Self, Self::Err> where Self: Sized {
         // TODO: Improve this HACK by, instead of using ',', searching for a
         // character not present in any of the original strings. This would
         // become a problem only when the __whole UTF-8 space__ is used in
@@ -730,7 +731,7 @@ impl<E: error::Error + 'static> From<E> for Error {
 /// program.
 impl TryFrom<Smargs<Self>> for () {
     type Error = Error;
-    fn try_from(_: Smargs<Self>) -> Result<Self, Self::Error> {
+    fn try_from(_: Smargs<Self>) -> StdResult<Self, Self::Error> {
         Ok(())
     }
 }
@@ -740,7 +741,7 @@ where
     T1: FromStr,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
         Ok((smargs.parse_next()?,))
     }
 }
@@ -751,7 +752,7 @@ where
     T2: FromStr,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
         Ok((
             smargs.parse_next()?,
             smargs.parse_next()?
@@ -766,7 +767,7 @@ where
     T3: FromStr,
 {
     type Error = Error;
-    fn try_from(mut smargs: Smargs<Self>) -> Result<Self, Self::Error> {
+    fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
         Ok((
             smargs.parse_next()?,
             smargs.parse_next()?,
@@ -778,7 +779,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{Break, Error, ErrorKind, Smargs, SmargKind, List, SmargsResult};
+    use super::{Break, Error, ErrorKind, Smargs, Kind, List, Result};
 
     // NOTE: Naming conventions:
     // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
@@ -792,8 +793,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
-                ("B", vec!["b"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
+                ("B", vec!["b"], Kind::Required),
             ])
             .parse("x 0 1".split(' ').map(String::from))
             .unwrap();
@@ -807,8 +808,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
-                ("B", vec!["b"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
+                ("B", vec!["b"], Kind::Required),
             ])
             .parse("x -a 0 1".split(' ').map(String::from))
             .unwrap();
@@ -822,8 +823,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["aa"], SmargKind::Required),
-                ("B", vec!["b"], SmargKind::Required),
+                ("A", vec!["aa"], Kind::Required),
+                ("B", vec!["b"], Kind::Required),
             ])
             .parse("x --aa 0 1".split(' ').map(String::from))
             .unwrap();
@@ -837,8 +838,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
-                ("B", vec!["b"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
+                ("B", vec!["b"], Kind::Required),
             ])
             .parse("x -b 1 0".split(' ').map(String::from))
             .unwrap();
@@ -852,7 +853,7 @@ mod tests {
         let (a,) = Smargs::<(i32,)>::with_definition(
             "Test program",
             [
-                ("A" , vec!["a"], SmargKind::Required),
+                ("A" , vec!["a"], Kind::Required),
             ])
             .parse("x -1".split(' ').map(String::from))
             .unwrap();
@@ -865,8 +866,8 @@ mod tests {
         let (s, a) = Smargs::<(String, usize)>::with_definition(
             "Test program",
             [
-                ("S" , vec!["s"], SmargKind::Required),
-                ("A" , vec!["a"], SmargKind::Optional("0")),
+                ("S" , vec!["s"], Kind::Required),
+                ("A" , vec!["a"], Kind::Optional("0")),
             ])
             .parse("x -s -a".split(' ').map(String::from))
             .unwrap();
@@ -882,7 +883,7 @@ mod tests {
         let (s,) = Smargs::<(String,)>::with_definition(
             "Test program",
             [
-                ("S" , vec![], SmargKind::Required),
+                ("S" , vec![], Kind::Required),
             ])
             .parse("x -s".split(' ').map(String::from))
             .unwrap();
@@ -895,7 +896,7 @@ mod tests {
         let (a,) = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Optional("0")),
+                ("A", vec!["a"], Kind::Optional("0")),
             ])
             .parse("x".split(' ').map(String::from))
             .unwrap();
@@ -908,7 +909,7 @@ mod tests {
         let (a,) = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Optional("1")),
+                ("A", vec!["a"], Kind::Optional("1")),
             ])
             .parse("x -a 0".split(' ').map(String::from))
             .unwrap();
@@ -921,7 +922,7 @@ mod tests {
         let (a,) = Smargs::<(bool,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Flag),
+                ("A", vec!["a"], Kind::Flag),
             ])
             .parse("x".split(' ').map(String::from))
             .unwrap();
@@ -934,7 +935,7 @@ mod tests {
         let (a,) = Smargs::<(bool,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Flag),
+                ("A", vec!["a"], Kind::Flag),
             ])
             .parse("x -a".split(' ').map(String::from))
             .unwrap();
@@ -947,8 +948,8 @@ mod tests {
         let (a, b) = Smargs::<(bool, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Flag),
-                ("B", vec!["b"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Flag),
+                ("B", vec!["b"], Kind::Required),
             ])
             .parse("x -ab 1".split(' ').map(String::from))
             .unwrap();
@@ -962,7 +963,7 @@ mod tests {
         let (a,) = Smargs::<(List<usize>,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::List(2)),
+                ("A", vec!["a"], Kind::List(2)),
             ])
             .parse("x -a 0 -a 1".split(' ').map(String::from))
             .unwrap();
@@ -977,7 +978,7 @@ mod tests {
         let (a,) = Smargs::<(List<usize>,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::List(2)),
+                ("A", vec!["a"], Kind::List(2)),
             ])
             .parse("x 0 -a 1".split(' ').map(String::from))
             .unwrap();
@@ -988,10 +989,10 @@ mod tests {
 
     #[test]
     fn parse_maybe_by_key_res_maybe_from_value() {
-        let (a,) = Smargs::<(SmargsResult<usize>,)>::with_definition(
+        let (a,) = Smargs::<(Result<usize>,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Maybe),
+                ("A", vec!["a"], Kind::Maybe),
             ])
             .parse("x -a 0".split(' ').map(String::from))
             .unwrap();
@@ -1003,11 +1004,11 @@ mod tests {
     // be something...
     #[test]
     fn parse_req_by_position_no_maybe_res_req_from_position_maybe_errors_missing_req() {
-        let (a, b) = Smargs::<(usize, SmargsResult<usize>,)>::with_definition(
+        let (a, b) = Smargs::<(usize, Result<usize>,)>::with_definition(
             "Test program",
             [
-                ("A",    vec![], SmargKind::Required),
-                ("B", vec!["b"], SmargKind::Maybe),
+                ("A",    vec![], Kind::Required),
+                ("B", vec!["b"], Kind::Maybe),
             ])
             .parse("x 0".split(' ').map(String::from))
             .unwrap();
@@ -1026,9 +1027,9 @@ mod tests {
         let (a, b, c) = Smargs::<(usize, usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
-                ("B", vec!["b"], SmargKind::Optional("1")),
-                ("C", vec!["c"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
+                ("B", vec!["b"], Kind::Optional("1")),
+                ("C", vec!["c"], Kind::Required),
             ])
             .parse("x 0 2".split(' ').map(String::from))
             .unwrap();
@@ -1057,7 +1058,7 @@ mod tests {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
             ])
             .help_default()
             .parse("x --help".split(' ').map(String::from))
@@ -1075,7 +1076,7 @@ mod tests {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
             ])
             .help_default()
             .parse("x -a 0 --help".split(' ').map(String::from))
@@ -1095,7 +1096,7 @@ mod tests {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
             ])
             .parse("x".split(' ').map(String::from))
             .unwrap_err();
@@ -1111,8 +1112,8 @@ mod tests {
         let err = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
-                ("B", vec!["b"], SmargKind::Optional("1")),
+                ("A", vec!["a"], Kind::Required),
+                ("B", vec!["b"], Kind::Optional("1")),
             ])
             .parse("x 0 2".split(' ').map(String::from))
             .unwrap_err();
@@ -1128,7 +1129,7 @@ mod tests {
         let err = Smargs::<(usize, )>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
             ])
             .parse(
                 "x -a 0 -a 1".split(' ').map(String::from)
@@ -1150,7 +1151,7 @@ mod tests {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], SmargKind::Required),
+                ("A", vec!["a"], Kind::Required),
             ])
             .parse("x -a".split(' ').map(String::from))
             .unwrap_err();
@@ -1170,7 +1171,7 @@ mod tests {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A" , vec!["a"], SmargKind::Required),
+                ("A" , vec!["a"], Kind::Required),
             ])
             .parse("x 0 -b".split(' ').map(String::from))
             .unwrap_err();
@@ -1190,7 +1191,7 @@ mod tests {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
-                ("A" , vec!["a"], SmargKind::Required),
+                ("A" , vec!["a"], Kind::Required),
             ])
             .parse("x -1".split(' ').map(String::from))
             .unwrap_err();
@@ -1212,8 +1213,8 @@ mod tests {
         let _ = Smargs::<(bool, bool)>::with_definition(
             "Test program",
             [
-                ("A",  vec!["a"], SmargKind::Flag),
-                ("Aa", vec!["a"], SmargKind::Flag),
+                ("A",  vec!["a"], Kind::Flag),
+                ("Aa", vec!["a"], Kind::Flag),
             ]
         );
     }

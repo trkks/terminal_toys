@@ -1,4 +1,4 @@
-use terminal_toys::{smargs, SmargsBreak, SmargsResult, SmargsError};
+use terminal_toys::{smärgs, smargs};
 use std::{str::FromStr, fmt::Display};
 
 
@@ -32,21 +32,21 @@ impl FromStr for NonEmptyString {
 
 /// Custom output type.
 #[derive(Debug)]
-struct RegistrationInfo(String, usize, SmargsResult<NonEmptyString>, String, bool);
+struct RegistrationInfo(String, usize, smargs::Result<NonEmptyString>, String, bool);
 
-fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, SmargsBreak> {
-    smargs!(
+fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, smargs::Break> {
+    smärgs!(
         "Register for a service",
         RegistrationInfo(
-            ("Your full name",                    [],                SmargKind::Required),
-            ("Your age",                          ["a", "age"],      SmargKind::Required),
+            ("Your full name",                    [],                Kind::Required),
+            ("Your age",                          ["a", "age"],      Kind::Required),
             (
                 "Email address without domain e.g. if address is 'foo@bar.baz' provide the 'foo' part",
                 ["e"],
-                SmargKind::Maybe
+                Kind::Maybe
             ),
-            ("Email address domain",              ["d"],             SmargKind::Optional("coolnewz.com")),
-            ("Opt-out from receiving newsletter", ["no-newsletter"], SmargKind::Flag),
+            ("Email address domain",              ["d"],             Kind::Optional("coolnewz.com")),
+            ("Opt-out from receiving newsletter", ["no-newsletter"], Kind::Flag),
         ),
     )
     .help_default()
@@ -81,7 +81,7 @@ fn main() {
     let RegistrationInfo(name, age, local_part, domain, no_subscribe) = {
         // Catch this error in order to make demonstration of actual parsing easier.
         let x = match parse(std::env::args()) {
-            Err(SmargsBreak { err: SmargsError::MissingRequired { .. }, .. }) if use_example_args() => {
+            Err(smargs::Break { err: smargs::Error::MissingRequired { .. }, .. }) if use_example_args() => {
                 // Use some hard-coded args for demonstration.
                 parse(example_args).expect("bad example args")
             },
@@ -120,7 +120,7 @@ fn main() {
         };
 
         let local_part = match local_part.0 {
-            Err(SmargsError::MissingRequired { .. } | SmargsError::Dummy(_)) => {
+            Err(smargs::Error::MissingRequired { .. } | smargs::Error::Dummy(_)) => {
                     eprintln!("Constructing default local part");
                     NonEmptyString(format!("{}.{}", name, age))
             },
