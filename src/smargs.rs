@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error;
 use std::fmt;
@@ -65,7 +65,7 @@ where
     /// 
     /// Note that the name of the program/command is assumed to be the first
     /// item in `args`.
-    pub fn parse(mut self, mut args: impl Iterator<Item = String>) -> StdResult<Ts, Break>
+    pub fn parse(mut self, mut args: impl DoubleEndedIterator<Item = String>) -> StdResult<Ts, Break>
     {
         if let Some(name) = args.next() {
             self.name = name;
@@ -198,12 +198,10 @@ where
     /// definitions!
     fn explicit_values(
         &self,
-        args: impl Iterator<Item = String>,
+        args: impl DoubleEndedIterator<Item = String>,
         help: &Help
     ) -> StdResult<Vec<Option<Vec<String>>>, Break> {
-        // TODO: A stack would work just as well (i.e., refactor to use Vec
-        // instead -> avoids confusion as to why exactly use VecDeque).
-        let mut args = VecDeque::from_iter(args);
+        let mut args_stack = Vec::from_iter(args.rev());
 
         // Put the values encountered into their specified indices.
         // Items are Vec<String> in order to support the List-variant
@@ -218,7 +216,7 @@ where
                 .find_map(|(i, x)|
                     (Self::is_required(x) && valuesb[i].is_none()).then_some(i)
                 );
-        while let Some(arg) = args.pop_front() {
+        while let Some(arg) = args_stack.pop() {
             // Remove the cli-syntax off of keys and normalize the
             // multi-character groups.
 
@@ -271,15 +269,11 @@ where
                     // multi-character group (which consist of multiple flags +
                     // possibly a key at the end
                     // i.e., "-abk <value>" => "-a -b -k <value>").
-                    let keys = arg.chars().map(|c| format!("-{}", c)).enumerate();
-                    // NOTE: There did not seem to be a reverse method for
-                    // VecDequeue::append e.g., "prepend" or smth.
-                    // Insert the keys "in order" to the front i.e.,
-                    // indx:  0, 1,..     0, 1, 2,..     0, 1, 2, 3,..
-                    // elem: -a:-_:xs -> -a:-b:-_:xs -> -a:-b:-k:-_:xs -> ...
-                    for (i, new_arg) in keys {
-                        args.insert(i, new_arg);
-                    }
+                    let keys = arg.chars().map(|c| format!("-{}", c));
+                    // Insert the keys "in order" to the "stack" i.e.,
+                    // order:  0, 1,..     0, 1, 2,..     0, 1, 2, 3,..
+                    // elem:  -a:-_:xs -> -a:-b:-_:xs -> -a:-b:-k:-_:xs -> ...
+                    args_stack.extend(keys.rev());
                     // Let the main-loop handle these added "new" keys normally.
                 },
                 /* "long" | "short" if arg.len() == 1 */ _ => {
@@ -308,7 +302,7 @@ where
                         Kind::List(_min) => {
                             // This case here is why `values` contains Vec<String>'s.
                             if let Some(list) = values[key_matched_index].as_mut() {
-                                if let Some(value) = args.pop_front() {
+                                if let Some(value) = args_stack.pop() {
                                     list.push(value);
                                 } else {
                                     return Err(help.short_break(
@@ -321,7 +315,7 @@ where
                             }
                         },
                         _ => {
-                            if let Some(value) = args.pop_front() {
+                            if let Some(value) = args_stack.pop() {
                                 if values[key_matched_index].replace(vec![value]).is_some() {
                                     return Err(help.short_break(
                                         Error::Smarg {

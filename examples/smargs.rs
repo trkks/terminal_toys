@@ -34,7 +34,7 @@ impl FromStr for NonEmptyString {
 #[derive(Debug)]
 struct RegistrationInfo(String, usize, smargs::Result<NonEmptyString>, String, bool);
 
-fn parse(args: impl Iterator<Item=String>) -> Result<RegistrationInfo, smargs::Break> {
+fn parse(args: impl DoubleEndedIterator<Item=String>) -> Result<RegistrationInfo, smargs::Break> {
     smärgs!(
         "Register for a service",
         RegistrationInfo(
@@ -62,7 +62,7 @@ fn use_example_args() -> bool {
     s.is_empty() || n <= 3 && "yes"[..n] == s[..n]
 }
 
-/// The same registration application example as seen in the documentation. TODO: Update documentation
+/// Similar registration example as seen in the documentation.
 fn main() {
     let mut newsletter_subscribers = vec![];
 
