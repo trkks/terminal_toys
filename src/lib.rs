@@ -112,31 +112,33 @@ macro_rules! color_log {
     };
 }
 
-/// Convenience-macro for describing your program and its expected arguments,
-/// constructing a `Smargs` instance and then parsing the actual arguments.
-///
-/// # Examples:
-/// Program description and arguments are defined using a list of tuples
-/// `(description, keys, kind)` and finally parsed from an `Iterator<Item =
-/// String>` into requested types:
+/// # Usage
 /// ```
 /// struct Input(usize, bool, String);
 /// let Input(foo, bar, baz) = terminal_toys::smargs!(
-///     "An example",
+///     "Example description",
 ///     Input(
-///         ("Foo", [], terminal_toys::SmargKind::Optional("42")),
-///         ("Bar", ["b"], terminal_toys::SmargKind::Flag),
-///         ("Baz", ["z", "baz"], terminal_toys::SmargKind::Required),
+///         ("Is Foo",   ["f", "foo"], terminal_toys::SmargKind::Optional("42")),
+///         ("Sets Bar", ["b"],        terminal_toys::SmargKind::Flag),
+///         ("Uses Baz", [],           terminal_toys::SmargKind::Required),
 ///     ),
 /// )
-/// .parse(vec!["x", "Bazbaz"].into_iter().map(String::from))
+/// .parse(vec!["x", "-b", "Bazbaz"].into_iter().map(String::from))
 /// .unwrap();
 /// 
 /// assert_eq!(foo, 42_usize);
-/// assert_eq!(bar, false);
+/// assert_eq!(bar, true);
 /// assert_eq!(baz, "Bazbaz".to_owned());
 /// ```
-/// Structs with named fields are also supported:
+/// # Description
+/// Convenience-macro for describing your program and its expected arguments,
+/// constructing a `Smargs` instance and then parsing the actual arguments.
+///
+/// Arguments are defined using a list of tuples `(description, keys, kind)` and
+/// parsed from an `Iterator<Item = String>` into types of target struct's fields.
+///
+/// # Examples
+/// Using a struct with named fields:
 /// ```
 /// # fn main() -> Result<(), String> {
 /// use terminal_toys::{smargs, List, SmargKind as Sk};
