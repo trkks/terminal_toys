@@ -512,6 +512,8 @@ impl Help {
 #[derive(Debug)]
 pub struct Break { pub err: Error, pub help: String }
 
+impl error::Error for Break { }
+
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
 pub enum Error {

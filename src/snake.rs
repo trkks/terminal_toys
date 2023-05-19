@@ -95,7 +95,6 @@ impl LogicHandler {
                 Input::Down  => dir = V2 { x: 0, y: 1 },
                 Input::Left  => dir = V2 { x:-1, y: 0 },
                 Input::Right => dir = V2 { x: 1, y: 0 },
-                // TODO Set head to LAST (reversed) from some input?
                 _            => { },
             };
 
