@@ -30,6 +30,18 @@ impl FromStr for NonEmptyString {
     }
 }
 
+/// Type for a simple error message.
+#[derive(Debug)]
+struct TextErrorMessage(String);
+impl Display for TextErrorMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for TextErrorMessage { }
+
+
 /// Custom output type.
 #[derive(Debug)]
 struct RegistrationInfo(String, usize, smargs::Result<NonEmptyString>, String, bool);
@@ -60,6 +72,33 @@ fn use_example_args() -> bool {
     let s = buf.trim().to_lowercase();
     let n = s.len();
     s.is_empty() || n <= 3 && "yes"[..n] == s[..n]
+}
+
+/// Demonstrate how `smargs::Error` can be handled e.g., using the `?` operator.
+fn construct_email(name: String, age: usize, local_part: smargs::Result<NonEmptyString>, domain: String) -> Result<String, smargs::Error> {
+    let split = domain.rsplit_once('.');
+    let (domain, tld) = match split {
+        Some((l, r)) if l.len() > 0 && r.len() > 0 => Ok((l, r)),
+        Some((l, _)) if l.len() > 0 => Ok((l, "com")),
+        _ => Err(smargs::Error::Dummy(Box::new(
+            TextErrorMessage(format!("malformed domain: '{}'", domain))
+        ))),
+    }?;
+
+    let local_part = local_part.0.or_else(|e|
+        if let smargs::Error::MissingRequired { .. } | smargs::Error::Dummy(_) = e {
+            eprintln!("Constructing default local part for email");
+            Ok(NonEmptyString(format!("{}.{}", name, age)))
+        } else {
+            Err(e)
+        }
+    )?;
+
+    Ok(
+        format!("{}@{}.{}", local_part.0, domain, tld)
+        .replace(' ', ".")
+        .to_lowercase()
+    )
 }
 
 /// Similar registration example as seen in the documentation.
@@ -111,29 +150,12 @@ fn main() {
         std::process::exit(1);
     }
 
-    let user_email = {
-        let split = domain.rsplit_once('.');
-        let (domain, tld) = match split {
-            Some((l, r)) if l.len() > 0 && r.len() > 0 => (l, r),
-            Some((l, _)) if l.len() > 0 => (l, "com"),
-            _ => panic!("malformed domain: '{}'", domain),
-        };
-
-        let local_part = match local_part.0 {
-            Err(smargs::Error::MissingRequired { .. } | smargs::Error::Dummy(_)) => {
-                    eprintln!("Constructing default local part");
-                    NonEmptyString(format!("{}.{}", name, age))
-            },
-            Err(e) => {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            },
-            Ok(x) => x,
-        };
-
-        format!("{}@{}.{}", local_part.0, domain, tld)
-            .replace(' ', ".")
-            .to_lowercase()
+    let user_email = match construct_email(name, age, local_part, domain) {
+        Ok(x) => x,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        },
     };
 
     let subscriber_count = newsletter_subscribers.len();
