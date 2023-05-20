@@ -715,7 +715,7 @@ where
 }
 
 /// This generic implementation prevents implementing `std::error::Error` for
-/// `smargs::Error`, but probably a a smaller price to pay than having to
+/// `smargs::Error`, but probably is a smaller price to pay than having to
 /// manually add support for each.
 impl<E: error::Error + 'static> From<E> for Error {
     fn from(value: E) -> Self {
@@ -732,46 +732,31 @@ impl TryFrom<Smargs<Self>> for () {
     }
 }
 
-impl<T1> TryFrom<Smargs<Self>> for (T1,)
-where
-    T1: FromStr,
-{
-    type Error = Error;
-    fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
-        Ok((smargs.parse_next()?,))
-    }
+/// Mass-implement `TryFrom<Smargs<_>>` for tuples made up of types implementing
+/// `FromStr`.
+macro_rules! tryfrom_impl {
+    ( $( $t:tt ),* ) => {
+        impl<$( $t ),*> TryFrom<Smargs<Self>> for ( $( $t, )* )
+        where
+            $(
+                $t: FromStr,
+            )* {
+            type Error = Error;
+            fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
+                Ok( ($( smargs.parse_next::<$t>()?, )*) )
+            }
+        }       
+    };
 }
 
-impl<T1, T2> TryFrom<Smargs<Self>> for (T1, T2)
-where
-    T1: FromStr,
-    T2: FromStr,
-{
-    type Error = Error;
-    fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
-        Ok((
-            smargs.parse_next()?,
-            smargs.parse_next()?
-        ))
-    }
-}
-
-impl<T1, T2, T3> TryFrom<Smargs<Self>> for (T1, T2, T3)
-where
-    T1: FromStr,
-    T2: FromStr,
-    T3: FromStr,
-{
-    type Error = Error;
-    fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
-        Ok((
-            smargs.parse_next()?,
-            smargs.parse_next()?,
-            smargs.parse_next()?,
-        ))
-    }
-}
-
+tryfrom_impl!(T1);
+tryfrom_impl!(T1,T2);
+tryfrom_impl!(T1,T2,T3);
+tryfrom_impl!(T1,T2,T3,T4);
+tryfrom_impl!(T1,T2,T3,T4,T5);
+tryfrom_impl!(T1,T2,T3,T4,T5,T6);
+tryfrom_impl!(T1,T2,T3,T4,T5,T6,T7);
+tryfrom_impl!(T1,T2,T3,T4,T5,T6,T7,T8);
 
 #[cfg(test)]
 mod tests {
