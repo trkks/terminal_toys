@@ -10,6 +10,11 @@ use std::str::FromStr;
 use std::marker::PhantomData;
 
 
+/// Return pattern for all required argument kinds.
+macro_rules! required_kinds {
+    () => { Kind::Required | Kind::List(1..) };
+}
+
 /// Wrapper to `Vec` that allows support for multiple values per one argument
 /// definition.
 /// TODO: Make this always contain a minimum number of items to work together
@@ -87,13 +92,11 @@ where
                 match self.list[i].kind {
                     Kind::Optional(default) => vec![default.to_owned()],
                     Kind::Flag | Kind::Help => vec![false.to_string()],
-                    Kind::List(0) => vec![],
-                    // TODO: A macro that basically expands to Self::is_required
-                    // would be gooder here.
-                    Kind::List(_) | Kind::Required => {
-                        let expected_count = self.list.iter().filter(|x| Self::is_required(x)).count();
+                    required_kinds!() => {
+                        let expected_count = self.list.iter().filter(|x| Self::is_required(&x.kind)).count();
                         return Err(help.short_break(Error::MissingRequired { expected_count }))
                     },
+                    Kind::List(_) => vec![],
                     // TODO: Is this right?
                     Kind::Maybe => vec![],
                 }
@@ -209,13 +212,13 @@ where
         // (non-Lists will contain only 1 element).
 
         let mut values = vec![None; self.list.len()];
-        let mut positioned_index = self.list.iter().position(Self::is_required);
+        let mut positioned_index = self.list.iter().position(|x| Self::is_required(&x.kind));
         let next_unsatisfied_required_position = |valuesb: &Vec<Option<_>>|
                 self.list
                 .iter()
                 .enumerate()
                 .find_map(|(i, x)|
-                    (Self::is_required(x) && valuesb[i].is_none()).then_some(i)
+                    (Self::is_required(&x.kind) && valuesb[i].is_none()).then_some(i)
                 );
         while let Some(arg) = args_stack.pop() {
             // Remove the cli-syntax off of keys and normalize the
@@ -464,8 +467,8 @@ where
     }
 
     /// Return if the definition represents a required argument.
-    fn is_required(smarg: &Smarg) -> bool {
-        matches!(smarg.kind, Kind::Required | Kind::List(1..))
+    fn is_required(kind: &Kind) -> bool {
+        matches!(kind, required_kinds!())
     }
 }
 
