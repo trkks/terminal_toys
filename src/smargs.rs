@@ -5,6 +5,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::iter::{self, FromIterator};
 use std::result::Result as StdResult;
+use std::str::FromStr;
 
 use std::marker::PhantomData;
 
@@ -349,25 +350,15 @@ where
     pub fn parse_next<T>(&mut self) -> StdResult<T, Error>
     where
         T: FromStr,
+        <T as FromStr>::Err: Into<Error>,
     {
         // TODO This seems unnecessarily complex...
         let index = self.index;
-        let value = match self
+        let value = self
             .values
             .get(index)
             .take()
-            .ok_or(Error::MissingRequired {
-                expected_count: self
-                    .list
-                    .iter()
-                    .filter(|x| matches!(x, Smarg { kind: Kind::Required, ..}))
-                    .count()
-            })
-        {
-            // Manual unwrap-exiting because std::ops::Try is unstable.
-            Ok(x) => x,
-            Err(e) => return Err(e),
-        };
+            .unwrap_or_else(|| panic!("nothing in index {}", index));
 
         let return_value = <T as FromStr>::from_str(&value[0]).map_err(|e| e.into());
 
@@ -658,33 +649,17 @@ impl fmt::Display for Kind {
 #[derive(Debug)]
 pub struct Result<T>(pub StdResult<T, Error>);
 
-/// "Newtrait" that allows implementing `FromStr` for `MyResult<T: FromStr>`
-/// that actually calls the method from `<T as FromStr>`.
-pub trait FromStr {
-    type Err: Into<Error>;
-    fn from_str(s: &str) -> StdResult<Self, Self::Err> where Self: Sized;
-}
-
-/// Generic implementation for all types that implement `std::str::FromStr`.
-impl<T> FromStr for T
-where
-    T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: Into<Error>,
-{
-    type Err = <T as std::str::FromStr>::Err;
-    fn from_str(s: &str) -> StdResult<Self, Self::Err> {
-        <Self as std::str::FromStr>::from_str(s)
-    }
-}
-
-/// Generic implementation for all types that implement `std::str::FromStr` but
+/// Generic implementation for all types that implement `FromStr` but
 /// into the Result-wrapper for returning errors from parsing specific arguments.
 impl<T> FromStr for Result<T>
 where
-    T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: Into<Error>,
+    T: FromStr,
+    <T as FromStr>::Err: Into<Error>,
 {
+    // The Result-wrapper will always be constructed (containing the value or
+    // an error), so "failing to parse" it from string is impossible.
     type Err = std::convert::Infallible;
+
     fn from_str(s: &str) -> StdResult<Self, Self::Err> {
         <T as FromStr>::from_str(s)
             .map(|x| Result(Ok(x)))
@@ -695,8 +670,8 @@ where
 
 impl<T> FromStr for List<T>
 where
-    T: std::str::FromStr,
-    <T as std::str::FromStr>::Err: Into<Error>,
+    T: FromStr,
+    <T as FromStr>::Err: Into<Error>,
 {
     type Err = <T as FromStr>::Err;
 
@@ -740,6 +715,7 @@ macro_rules! tryfrom_impl {
         where
             $(
                 $t: FromStr,
+                <$t as FromStr>::Err: error::Error + 'static,
             )* {
             type Error = Error;
             fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
