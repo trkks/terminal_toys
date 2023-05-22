@@ -15,6 +15,45 @@ macro_rules! required_kinds {
     () => { Kind::Required | Kind::List(1..) };
 }
 
+/// Type for keeping track of the kind of argument associated with the
+/// program argument.
+#[derive(Debug, Clone)]
+pub enum Value {
+    None,
+    Just(String),
+    List(Vec<String>),
+}
+
+impl Value {
+    /// Add the string to the value and "upgrade" to the bigger variant along
+    /// the way.
+    fn push(&mut self, value: String) {
+        match self {
+            Self::None     => {
+                *self = Self::Just(value);
+            },
+            Self::Just(x)  => {
+                *self = Self::List(vec![x.to_owned(), value]);
+            },
+            Self::List(xs) => {
+                xs.push(value);
+            },
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f, "{}", match self {
+                Self::None     => "".to_owned(),
+                Self::Just(x)  => x.clone(),
+                Self::List(xs) => xs.join(", "),
+            },
+        )
+    }
+}
+
 /// Wrapper to `Vec` that allows support for multiple values per one argument
 /// definition.
 /// TODO: Make this always contain a minimum number of items to work together
@@ -45,7 +84,7 @@ pub struct Smargs<Ts> {
     /// `TryFrom<Smargs<_>> for CustomOutput`.
     output: PhantomData<Ts>,
     /// Field where the given arguments are stored for parsing later.
-    values: Vec<Vec<String>>,
+    values: Vec<Value>,
 }
 
 impl<Ts> Smargs<Ts>
@@ -90,25 +129,18 @@ where
         {
             value.replace(
                 match self.list[i].kind {
-                    Kind::Optional(default) => vec![default.to_owned()],
-                    Kind::Flag | Kind::Help => vec![false.to_string()],
+                    Kind::Optional(default) => Value::Just(default.to_owned()),
+                    Kind::Flag | Kind::Help => Value::Just(false.to_string()),
                     required_kinds!() => {
                         let expected_count = self.list.iter().filter(|x| Self::is_required(&x.kind)).count();
                         return Err(help.short_break(Error::MissingRequired { expected_count }))
                     },
-                    Kind::List(_) => vec![],
-                    // TODO: Is this right?
-                    Kind::Maybe => vec![],
+                    Kind::List(_) => Value::List(vec![]),
+                    Kind::Maybe => Value::None,
                 }
             );
         }
 
-        // HACK: Concat items with a RARE delimiter to support parsing a List
-        // from string.
-        for xs in values.iter_mut() {
-            let single_string = xs.take().unwrap().join(",");
-            xs.replace(vec![single_string]);
-        }
 
         // Update self with the resolved values.
         self.values = values.into_iter().map(|x| x.expect("not all values handled")).collect();
@@ -197,28 +229,29 @@ where
     }
 
     /// Find the explicitly provided values based on definition and `args`.
-    /// 
+    ///
     /// NOTE: The amount of resulting values must be equal to the amount of
     /// definitions!
     fn explicit_values(
         &self,
         args: impl DoubleEndedIterator<Item = String>,
         help: &Help
-    ) -> StdResult<Vec<Option<Vec<String>>>, Break> {
+    ) -> StdResult<Vec<Option<Value>>, Break> {
         let mut args_stack = Vec::from_iter(args.rev());
 
-        // Put the values encountered into their specified indices.
-        // Items are Vec<String> in order to support the List-variant
-        // (non-Lists will contain only 1 element).
-
-        let mut values = vec![None; self.list.len()];
+        let mut values: Vec<Option<Value>> = vec![None; self.list.len()];
         let mut positioned_index = self.list.iter().position(|x| Self::is_required(&x.kind));
-        let next_unsatisfied_required_position = |valuesb: &Vec<Option<_>>|
+
+        let is_unsatisfied = |kind, value: &Option<_>|
+            Self::is_required(kind) && value.is_none()
+            || matches!((kind, value), (Kind::List(n), Some(Value::List(xs))) if xs.len() < *n);
+
+        let next_unsatisfied_required_position = |values_: &Vec<Option<_>>|
                 self.list
                 .iter()
                 .enumerate()
                 .find_map(|(i, x)|
-                    (Self::is_required(&x.kind) && valuesb[i].is_none()).then_some(i)
+                    is_unsatisfied(&x.kind, &values_[i]).then_some(i)
                 );
         while let Some(arg) = args_stack.pop() {
             // Remove the cli-syntax off of keys and normalize the
@@ -259,12 +292,12 @@ where
                     let idx = positioned_index
                         .ok_or_else(|| help.short_break(Error::UndefinedArgument(arg.clone())))?;
                     if values[idx].is_none() {
-                        values[idx].replace(vec![arg]);
+                        values[idx].replace(Value::Just(arg));
                         positioned_index = next_unsatisfied_required_position(&values);
                     } else {
                         panic!(
-                            "tried to replace explicitly specified argument '{}' == '{}' with '{}'",
-                            self.list[idx], values[idx].as_ref().unwrap()[0], arg,
+                            "tried to replace already specified argument '{}' => {} with '{}'",
+                            self.list[idx], values[idx].as_ref().unwrap(), arg,
                         );
                     }
                 },
@@ -294,7 +327,7 @@ where
                             return Err(help.long_break(Error::Help))
                         },
                         Kind::Flag => {
-                            if values[key_matched_index].replace(vec![true.to_string()]).is_some() {
+                            if values[key_matched_index].replace(Value::Just(true.to_string())).is_some() {
                                 // TODO: Wouldn't this more specifically be
                                 // "Error::DuplicateFlag(arg)"?
                                 panic!(
@@ -304,7 +337,6 @@ where
                             }
                         },
                         Kind::List(_min) => {
-                            // This case here is why `values` contains Vec<String>'s.
                             if let Some(list) = values[key_matched_index].as_mut() {
                                 if let Some(value) = args_stack.pop() {
                                     list.push(value);
@@ -320,7 +352,7 @@ where
                         },
                         _ => {
                             if let Some(value) = args_stack.pop() {
-                                if values[key_matched_index].replace(vec![value]).is_some() {
+                                if values[key_matched_index].replace(Value::Just(value)).is_some() {
                                     return Err(help.short_break(
                                         Error::Smarg {
                                             printable_arg: smarg.to_string(),
@@ -347,7 +379,7 @@ where
     }
 
     /// NOTE: Not to be called by user directly; instead use the `From`
-    /// implementations or `smargs` macro!
+    /// implementations or `smärgs` macro!
     /// 
     /// Parse into the type `T` the next value of arg defined in running order.
     pub fn parse_next<T>(&mut self) -> StdResult<T, Error>
@@ -363,7 +395,16 @@ where
             .take()
             .unwrap_or_else(|| panic!("nothing in index {}", index));
 
-        let return_value = <T as FromStr>::from_str(&value[0]).map_err(|e| e.into());
+        let return_value = match value {
+            Value::None => {
+                let expected_count = self.list.iter().filter(|x| Self::is_required(&x.kind)).count();
+                return Err(Error::MissingRequired { expected_count })
+            },
+            Value::Just(x) => <T as FromStr>::from_str(x).map_err(|e| e.into()),
+            // HACK: Concat items with a RARE delimiter to support parsing a
+            // List from string.
+            Value::List(xs) => <T as FromStr>::from_str(&xs.join(",")).map_err(|e| e.into()),
+        };
 
         // Update index.
         self.index += 1;
@@ -477,9 +518,6 @@ where
 pub enum ErrorKind {
     Duplicate,
     MissingValue,
-    // TODO: Could implementing From<FromStr::Err> for smargs::Error make
-    // handling this case easier? See:
-    // https://doc.rust-lang.org/std/convert/trait.From.html#examples
     Parsing(&'static str, String, Box<dyn error::Error>),
 }
 
@@ -664,10 +702,13 @@ where
     type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> StdResult<Self, Self::Err> {
-        <T as FromStr>::from_str(s)
-            .map(|x| Result(Ok(x)))
-            // Wrap the error inside.
-            .or_else(|e| Ok(Result(Err(e.into()))))
+        Ok(
+            match <T as FromStr>::from_str(s) {
+                Ok(x) => Result(Ok(x)),
+                            // Wrap the error inside.
+                Err(e)   => Result(Err(e.into())),
+            }
+        )
     }
 }
 
@@ -976,8 +1017,7 @@ mod tests {
         assert_eq!(a, 0);
         assert!(matches!(
             b.0.unwrap_err(),
-            Error::Dummy(boxed_err)
-                if boxed_err.is::<std::num::ParseIntError>(),
+            Error::MissingRequired { expected_count: 2 },
         ));
     }
 
