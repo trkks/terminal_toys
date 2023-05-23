@@ -54,13 +54,65 @@ impl fmt::Display for Value {
     }
 }
 
+pub trait FromValue {
+    type Error;
+
+    fn try_from(value: Value) -> StdResult<Self, Error> where Self: Sized;
+}
+
+impl<T> FromValue for List<T>
+where
+    T: FromStr + fmt::Debug,
+    <T as FromStr>::Err: error::Error + 'static,
+{
+    type Error = Error;
+
+    fn try_from(value: Value) -> StdResult<Self, Error> {
+        match value {
+            Value::None     => Err(Error::Placeholder),
+            Value::Just(x)  => Ok(List(vec![<T as FromStr>::from_str(&x).map_err(|e| Error::Dummy(Box::new(e)))?])),
+            Value::List(xs) => {
+                let mut results: Vec<Option<StdResult<T, _>>> = xs.into_iter().map(|x| Some(<T as FromStr>::from_str(&x))).collect();
+                let mut found_error = None;
+                for i in 0..results.len() {
+                    if results[i].as_ref().unwrap().is_err() {
+                        found_error = Some(i);
+                        break;
+                    }
+                }
+                if let Some(i) = found_error {
+                    let error = results[i].take().unwrap().unwrap_err();
+                    Err(Error::Dummy(Box::new(error)))
+                } else {
+                    let values = results.into_iter().map(|x| x.unwrap().unwrap()).collect();
+                    Ok(List(values))
+                }
+            },
+        }
+    }
+}
+
+impl<T> FromValue for T
+where
+    T: FromStr,
+    <T as FromStr>::Err: error::Error + 'static,
+{
+    type Error = Error;
+
+    fn try_from(value: Value) -> StdResult<Self, Error> {
+        match value {
+            Value::None     => Err(Error::Placeholder),
+            Value::Just(x)  => <T as FromStr>::from_str(&x).map_err(|e| Error::Dummy(Box::new(e))),
+            Value::List(xs) => panic!("bad"),
+        }
+    }
+}
+
 /// Wrapper to `Vec` that allows support for multiple values per one argument
 /// definition.
 /// TODO: Make this always contain a minimum number of items to work together
 /// with the SmargKind::List(min).
 pub struct List<T: FromStr>(pub Vec<T>);
-
-const LIST_DELIM: &str = ",";
 
         
 impl<T: FromStr> From<List<T>> for Vec<T> {
@@ -82,7 +134,7 @@ pub struct Smargs<Ts> {
     list: Vec<Smarg>,
     /// Mapping of keys to to positions.
     map: HashMap<String, usize>,
-    /// NOTE: This is here in order to support the `smargs`-macro implementing
+    /// NOTE: This is here in order to support the `smärgs`-macro implementing
     /// `TryFrom<Smargs<_>> for CustomOutput`.
     output: PhantomData<Ts>,
     /// Field where the given arguments are stored for parsing later.
@@ -386,8 +438,8 @@ where
     /// Parse into the type `T` the next value of arg defined in running order.
     pub fn parse_next<T>(&mut self) -> StdResult<T, Error>
     where
-        T: FromStr,
-        <T as FromStr>::Err: Into<Error>,
+        T: FromValue,
+        <T as FromValue>::Error: Into<Error>,
     {
         // TODO This seems unnecessarily complex...
         let index = self.index;
@@ -397,16 +449,7 @@ where
             .take()
             .unwrap_or_else(|| panic!("nothing in index {}", index));
 
-        let return_value = match value {
-            Value::None => {
-                let expected_count = self.list.iter().filter(|x| Self::is_required(&x.kind)).count();
-                return Err(Error::MissingRequired { expected_count })
-            },
-            Value::Just(x) => <T as FromStr>::from_str(x).map_err(|e| e.into()),
-            // HACK: Concat items with a RARE delimiter to support parsing a
-            // List from string.
-            Value::List(xs) => <T as FromStr>::from_str(&xs.join(LIST_DELIM)).map_err(|e| e.into()),
-        };
+        let return_value = <T as FromValue>::try_from(value.to_owned());
 
         // Update index.
         self.index += 1;
@@ -551,6 +594,7 @@ impl error::Error for Break { }
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
 pub enum Error {
+    Placeholder,
     /// Represents explicit help request i.e., the help-key was found.
     Help,
     MissingRequired { expected_count: usize },
@@ -587,6 +631,7 @@ impl fmt::Display for Break {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
+            Self::Placeholder => "PLACEHOLDER ERROR".to_owned(),
             Self::Help => "help".to_owned(),
             Self::MissingRequired { expected_count: expected } => {
                 // TODO What about "required _at least_ of X" in case of (future)
@@ -714,27 +759,6 @@ where
     }
 }
 
-impl<T> FromStr for List<T>
-where
-    T: FromStr,
-    <T as FromStr>::Err: Into<Error>,
-{
-    type Err = <T as FromStr>::Err;
-
-    fn from_str(s: &str) -> StdResult<Self, Self::Err> where Self: Sized {
-        // TODO: Improve this HACK by, instead of using STRING_DELIM, searching
-        // for a character not present in any of the original strings. This
-        // would become a problem only when the __whole UTF-8 space__ is used
-        // in arguments.
-        let mut xs = Vec::new();
-        for x in s.split(LIST_DELIM) {
-            xs.push(<T as FromStr>::from_str(x)?);
-        }
-        Ok(List(xs))
-    }
-
-}
-
 /// This generic implementation prevents implementing `std::error::Error` for
 /// `smargs::Error`, but probably is a smaller price to pay than having to
 /// manually add support for each.
@@ -760,8 +784,8 @@ macro_rules! tryfrom_impl {
         impl<$( $t ),*> TryFrom<Smargs<Self>> for ( $( $t, )* )
         where
             $(
-                $t: FromStr,
-                <$t as FromStr>::Err: error::Error + 'static,
+                $t: FromValue,
+                <$t as FromValue>::Error: Into<Error>,
             )* {
             type Error = Error;
             fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
