@@ -43,13 +43,12 @@ impl std::error::Error for TextErrorMessage { }
 
 
 /// Custom output type.
-#[derive(Debug)]
-struct RegistrationInfo(String, usize, smargs::Result<NonEmptyString>, String, bool);
+type RegistrationInfo = (String, usize, smargs::Result<NonEmptyString>, String, bool);
 
 fn parse(args: impl DoubleEndedIterator<Item=String>) -> Result<RegistrationInfo, smargs::Break> {
     smärgs!(
         "Register for a service",
-        RegistrationInfo(
+        (
             ("Your full name",                    [],                Kind::Required),
             ("Your age",                          ["a", "age"],      Kind::Required),
             (
@@ -117,7 +116,7 @@ fn main() {
     .into_iter()
     .map(String::from);
 
-    let RegistrationInfo(name, age, local_part, domain, no_subscribe) = {
+    let (name, age, local_part, domain, no_subscribe) = {
         // Catch this error in order to make demonstration of actual parsing easier.
         let x = match parse(std::env::args()) {
             Err(smargs::Break { err: smargs::Error::MissingRequired { .. }, .. }) if use_example_args() => {

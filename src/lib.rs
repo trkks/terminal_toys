@@ -231,6 +231,7 @@ macro_rules! color_log {
 /// ```
 #[macro_export]
 macro_rules! smärgs {
+    // Named tuple-container.
     ( $program_desc:literal , $container_name:ident $container:tt $(,)? ) => {
         {
             use terminal_toys::{
@@ -254,6 +255,22 @@ macro_rules! smärgs {
             }
 
             let mut smargs = Smargs::<$container_name>::new($program_desc);
+            container_push!( smargs, $container );
+
+            smargs
+        }
+    };
+
+    // Tuple-container (that is pre-impl'd).
+    ( $program_desc:literal , $container:tt $(,)? ) => {
+       {
+            use terminal_toys::{
+                container_push,
+                unwrap_push,
+                smargs::{Smargs, Smarg, Kind, Error}
+            };
+
+            let mut smargs = Smargs::new($program_desc);
             container_push!( smargs, $container );
 
             smargs
