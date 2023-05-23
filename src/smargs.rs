@@ -60,6 +60,8 @@ impl fmt::Display for Value {
 /// with the SmargKind::List(min).
 pub struct List<T: FromStr>(pub Vec<T>);
 
+const LIST_DELIM: &str = ",";
+
         
 impl<T: FromStr> From<List<T>> for Vec<T> {
     fn from(value: List<T>) -> Self {
@@ -403,7 +405,7 @@ where
             Value::Just(x) => <T as FromStr>::from_str(x).map_err(|e| e.into()),
             // HACK: Concat items with a RARE delimiter to support parsing a
             // List from string.
-            Value::List(xs) => <T as FromStr>::from_str(&xs.join(",")).map_err(|e| e.into()),
+            Value::List(xs) => <T as FromStr>::from_str(&xs.join(LIST_DELIM)).map_err(|e| e.into()),
         };
 
         // Update index.
@@ -720,12 +722,12 @@ where
     type Err = <T as FromStr>::Err;
 
     fn from_str(s: &str) -> StdResult<Self, Self::Err> where Self: Sized {
-        // TODO: Improve this HACK by, instead of using ',', searching for a
-        // character not present in any of the original strings. This would
-        // become a problem only when the __whole UTF-8 space__ is used in
-        // arguments.
+        // TODO: Improve this HACK by, instead of using STRING_DELIM, searching
+        // for a character not present in any of the original strings. This
+        // would become a problem only when the __whole UTF-8 space__ is used
+        // in arguments.
         let mut xs = Vec::new();
-        for x in s.split(',') {
+        for x in s.split(LIST_DELIM) {
             xs.push(<T as FromStr>::from_str(x)?);
         }
         Ok(List(xs))
