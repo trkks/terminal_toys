@@ -594,15 +594,20 @@ impl error::Error for Break { }
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
 pub enum Error {
-    Placeholder,
-    /// Represents explicit help request i.e., the help-key was found.
-    Help,
-    MissingRequired { expected_count: usize },
-    UndefinedArgument(String),
-    UndefinedKey(String),
-    Smarg { printable_arg: String, kind: ErrorKind },
-    /// Wrap a user-defined error.
+    /// For converting from any error to this. TODO: For what reason exactly?
     Dummy(Box<dyn error::Error>),
+    /// Found an unexpected extra match for `Smarg`.
+    Duplicate { first: (String, Value), extra: (String, Value) },
+    /// Instructions were explicitly request i.e., the help-key was found.
+    Help,
+    /// A matching value for `Smarg` was expected but is missing.
+    Missing(Smarg),
+    /// Parsing from `Value` as matched to `Smarg` failed.
+    Parsing { of: Smarg, from: Value, failed_with: Box<dyn error::Error> },
+    /// No match found for given argument.
+    UndefinedArgument(String),
+    /// No match found for given key.
+    UndefinedKey(String),
 }
 
 impl Error {
@@ -631,33 +636,23 @@ impl fmt::Display for Break {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
-            Self::Placeholder => "PLACEHOLDER ERROR".to_owned(),
+            Self::Duplicate { first, extra } => {
+                format!(
+                    "already matched '{}'='{}' but then found '{}'='{}'",
+                    first.0, first.1, extra.0, extra.1,
+                )
+            },
             Self::Help => "help".to_owned(),
-            Self::MissingRequired { expected_count: expected } => {
-                // TODO What about "required _at least_ of X" in case of (future)
-                // list-type arguments?
-                format!("not enough arguments (expected {}).", expected)
+            Self::Missing(smarg) => format!("argument missing for {}", smarg),
+            Self::Parsing { of, from, failed_with } => {
+                format!(
+                    "failed to parse {} from '{}': {:?}",
+                    of, from, failed_with
+                ),
             },
-            Self::UndefinedArgument(arg) => {
-                format!("extra argument '{}'", arg)
-            },
+            Self::UndefinedArgument(arg) => format!("extra argument '{}'", arg),
             // TODO Suggest similar existing arguments in case of user typo.
             Self::UndefinedKey(key) => format!("option '{}' does not exist", key),
-            Self::Smarg { printable_arg, kind } => format!(
-                "{}. Usage: {}",
-                match kind {
-                    // TODO Inform how many times the argument was illegally repeated.
-                    ErrorKind::Duplicate => "too many entries of this argument".to_owned(),
-                    // TODO Elaborate on the type of value.
-                    ErrorKind::MissingValue => "option key used but missing the value".to_owned(),
-                    ErrorKind::Parsing(tname, input, e) => format!(
-                        "failed to parse the type {} from input '{}': {}",
-                        tname, input, e
-                    ),
-                },
-                printable_arg
-            ),
-            Self::Dummy(msg) => format!("{}, baka.", msg),
         };
         write!(f, "{}", msg)
     }
@@ -1043,7 +1038,7 @@ mod tests {
         assert_eq!(a, 0);
         assert!(matches!(
             b.0.unwrap_err(),
-            Error::MissingRequired { expected_count: 2 },
+            Error::Missing(Smarg { desc, keys, kind: Kind::Required),
         ));
     }
 
@@ -1092,9 +1087,9 @@ mod tests {
 
         assert!(matches!(
             err,
-            Break { err: Error::Help, ref help }
+            Break { err: Error::Help, help }
                 if !help.is_empty(),
-        ), "{:?}", err);
+        ));
     }
 
     #[test]
@@ -1118,7 +1113,7 @@ mod tests {
     // Error/panic-conditions:
 
     #[test]
-    fn parse_no_req_res_errors_missing_req() {
+    fn parse_no_req_res_errors_req_arg_missing_value() {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
@@ -1129,7 +1124,7 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break { err: Error::MissingRequired { expected_count: 1 }, .. },
+            Break { err: Error::Missing(Smarg { desc, keys, kind: Kind::Required }), .. },
         ));
     }
 
@@ -1164,16 +1159,18 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break { err: Error::Smarg { .. }, .. }
-        ));
-        assert!(matches!(
-            match err.err { Error::Smarg { kind, .. } => kind, _ => panic!("impossible"), },
-            ErrorKind::Duplicate,
+            Break {
+                err: Error::Duplicate {
+                    first: (_key, Value::Just("1")),
+                    extra: (_key, Value::Just("0")),
+                },
+                ..
+            },
         ));
     }
 
     #[test]
-    fn parse_req_by_key_no_value_res_errors_arg_missing_value() {
+    fn parse_req_by_key_no_value_res_errors_req_arg_missing_value() {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
             [
@@ -1184,11 +1181,23 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break{err: Error::Smarg { .. }, .. },
+            Break { err: Error::Missing(Smarg { kind: Kind::Required, .. }), .. },
         ));
+    }
+
+    #[test]
+    fn parse_opt_by_key_no_value_res_errors_opt_arg_missing_value() {
+        let err = Smargs::<(usize,)>::with_definition(
+            "Test program",
+            [
+                ("A", vec!["a"], Kind::Optional("0")),
+            ])
+            .parse("x -a".split(' ').map(String::from))
+            .unwrap_err();
+
         assert!(matches!(
-            match err.err { Error::Smarg { kind, .. } => kind, _ => panic!("impossible"), },
-            ErrorKind::MissingValue,
+            err,
+            Break { err: Error::Missing(Smarg { kind: Kind::Optional(_), .. }), .. },
         ));
     }
 
@@ -1204,12 +1213,8 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break { .. },
+            Break { err: Error::UndefinedKey(x), .. } if "b".to_string(),
         ));
-        assert_eq!(
-            match err.err { Error::UndefinedKey(x) => x, _ => panic!("impossible"), },
-            "b".to_string(),
-        );
     }
 
     #[test]
@@ -1224,11 +1229,7 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break{err: Error::Dummy(_), .. },
-        ));
-        assert!(matches!(
-            err.err,
-            Error::Dummy(boxed_err)
+            Break { err: Error::Parsing { of: Smarg { .. }, because: boxed_err }, .. }
                 if boxed_err.is::<std::num::ParseIntError>(),
         ));
     }
