@@ -310,7 +310,7 @@ where
         args: impl DoubleEndedIterator<Item = String>,
         help: &Help
     ) -> StdResult<Vec<Option<Value>>, Break> {
-        let mut state: ValueParserState<'_, > = ValueParserState::new(args, self.list.len());
+        let mut state: ValueParserState = ValueParserState::new(args, self.list.len());
         state.rindex = self.list.iter().position(|x| x.kind.is_required());
 
         while let Some(arg) = state.stack.pop() {
@@ -351,11 +351,17 @@ where
                     // key-value method.
                     let idx = state.rindex
                         .ok_or_else(|| help.short_break(Error::UndefinedArgument(arg.clone())))?;
-                    if state.values[idx].replace(Value::Just(arg.clone().value)).is_some() {
+                    if let Some(first_val) = state.values[idx].replace(Value::Just(arg.clone().value)) {
                         return Err(help.short_break(
                             Error::Duplicate {
-                                first: state.history[idx].unwrap().arg.clone(),
-                                extra: arg,
+                                first: (
+                                    state.history[idx].as_mut().unwrap().pop().unwrap().clone(),
+                                    first_val
+                                ),
+                                extra: (
+                                    arg,
+                                    state.values[idx].take().unwrap(),
+                                )
                             }
                         ));
                     }
@@ -376,7 +382,7 @@ where
                 Key::Long | Key::Short { group_size: 1 } => {
                     // Save the handled arg and how it was got for future
                     // reference in case of errors.
-                    state.resolve_smarg_value(&self, arg, help)?;
+                    state.resolve_keyed_value(&self, arg, help)?;
                 },
                 Key::Short { .. } => {
                     panic!("should be impossible to have matched '-'");
@@ -404,7 +410,16 @@ where
             .take()
             .unwrap_or_else(|| panic!("nothing in index {}", index));
 
-        let return_value = <T as FromValue>::try_from(value.to_owned());
+        let return_value = <T as FromValue>::try_from(value.to_owned())
+            .map_err(|err|
+                if let Error::Dummy(err_box) = err {
+                    // Fill in the dummy error with information held at this
+                    // level about the failed arg's definition.
+                    Error::Parsing { of: self.list[index].clone(), from: value.clone(), failed_with: err_box }
+                } else {
+                    err
+                }
+            );
 
         // Update index.
         self.index += 1;
@@ -508,22 +523,17 @@ where
     }
 }
 
-#[derive(Debug,Clone,Copy)]
-struct Record<'a> {
-    arg: &'a Arg,
-}
-
-struct ValueParserState<'a> {
+struct ValueParserState {
     /// "RequiredINDEX"; index of the next required definition.
     rindex: Option<usize>,
     stack: Vec<String>,
     /// Record for how each value was collected.
-    history: Vec<Option<Record<'a>>>,
+    history: Vec<Option<Vec<Arg>>>,
     /// Values found matching each received argument. The index is a
     /// handle to the history, where this value was picked from.
     values: Vec<Option<Value>>,
 }
-impl ValueParserState<'_> {
+impl ValueParserState {
     fn new(args: impl DoubleEndedIterator<Item = String>, n: usize) -> Self {
         Self {
             rindex: None,
@@ -546,9 +556,9 @@ impl ValueParserState<'_> {
             );
     }
 
-    /// Select and update out-parameters based on the matched `Smarg`
-    /// definition.
-    fn resolve_smarg_value<Ts>(
+    /// Select and update state based on the matched value for given key, i.e.,
+    /// the thing "resolved" here is definitely a "-key [value]" type of deal.
+    fn resolve_keyed_value<Ts>(
         &mut self,
         smargs: &Smargs<Ts>,
         arg: Arg,
@@ -570,11 +580,26 @@ impl ValueParserState<'_> {
                 return Err(help.long_break(Error::Help));
             },
             Kind::Flag => {
-                if self.values[key_matched_index].replace(Value::Just(true.to_string())).is_some() {
+                if let Some(first_val) = self.values[key_matched_index].replace(Value::Just(true.to_string())) {
                     return Err(help.short_break(
-                        Error::Duplicate { first: self.history[key_matched_index].unwrap().arg.clone(), extra: arg }
+                        Error::Duplicate {
+                            first: (
+                                self.history[key_matched_index].as_mut().unwrap().pop().unwrap().clone(),
+                                first_val,
+                            ),
+                            extra: (
+                                arg,
+                                self.values[key_matched_index].take().unwrap(),
+                            )
+                        }
                     ));
                 }
+                // Update history; index matches with chosen value.
+                let history = vec![arg];
+                assert!(
+                    self.history[key_matched_index].replace(history).is_none(),
+                    "should be impossible to overwrite flag's history"
+                );
             },
             Kind::List(_min) => {
                 if let Some(list) = self.values[key_matched_index].as_mut() {
@@ -586,20 +611,38 @@ impl ValueParserState<'_> {
                         ));
                     }
                 }
+                // Update history; index matches with chosen value.
+                if self.history[key_matched_index].is_some() {
+                    self.history[key_matched_index].as_mut().unwrap().push(arg);
+                } else {
+                    self.history[key_matched_index].replace(vec![]);
+                }
             },
             _ => {
                 if let Some(value) = self.stack.pop() {
-                    if self.values[key_matched_index].replace(Value::Just(value)).is_some() {
+                    if let Some(first_val) = self.values[key_matched_index].replace(Value::Just(value)) {
                         return Err(help.short_break(
                             Error::Duplicate {
-                                first: self.history[key_matched_index].unwrap().arg.clone(),
-                                extra: arg.clone(),
+                                first: (
+                                    self.history[key_matched_index].as_mut().unwrap().pop().unwrap().clone(),
+                                    first_val,
+                                ),
+                                extra: (
+                                    arg.clone(),
+                                    self.values[key_matched_index].take().unwrap(),
+                                ),
                             }
                         ));
                     }
                     // Update the position because this required was received
-                    // based on  key-value.
+                    // based on key-value.
                     self.next_unsatisfied_required_position(&smargs.list);
+                    // Update history; index matches with chosen value.
+                    let history = vec![arg];
+                    assert!(
+                        self.history[key_matched_index].replace(history).is_none(),
+                        "should be impossible to overwrite option's history"
+                    );
                 } else {
                     return Err(help.short_break(Error::Missing(smarg.clone())));
                 }
@@ -649,10 +692,10 @@ pub enum Error {
     // TODO: Might need another Error-enum alltogether for conversions from
     // Value...
     Placeholder,
-    /// For converting from any error to this. TODO: For what reason exactly?
+    /// For converting from any (user-defined) error to this.
     Dummy(Box<dyn error::Error>),
     /// Found an unexpected extra match for `Smarg`.
-    Duplicate { first: Arg, extra: Arg },
+    Duplicate { first: (Arg, Value), extra: (Arg, Value) },
     /// Instructions were explicitly request i.e., the help-key was found.
     Help,
     /// A matching value for `Smarg` was expected but is missing.
@@ -686,7 +729,10 @@ impl fmt::Display for Error {
             Self::Placeholder => "Placeholder error".to_owned(),
             Self::Dummy(e) => format!("{}, baka", e),
             Self::Duplicate { first, extra } => {
-                format!("already matched {} but then found {}", first, extra)
+                format!(
+                    "already matched {}: {} but then found {}: {}",
+                    first.0, first.1, extra.0, extra.1,
+                )
             },
             Self::Help => "help".to_owned(),
             Self::Missing(smarg) => format!("argument missing for {}", smarg),
@@ -786,24 +832,19 @@ impl fmt::Display for Kind {
 pub struct Result<T>(pub StdResult<T, Error>);
 
 /// Generic implementation for all types that implement `FromStr` but
-/// into the Result-wrapper for returning errors from parsing specific arguments.
-impl<T> FromStr for Result<T>
+/// into the Result-wrapper for returning errors from parsing specific
+/// arguments.
+impl<T> FromValue for Result<T>
 where
-    T: FromStr,
-    <T as FromStr>::Err: Into<Error>,
+    T: FromValue,
+    <T as FromValue>::Error: Into<Error>,
 {
     // The Result-wrapper will always be constructed (containing the value or
     // an error), so "failing to parse" it from string is impossible.
-    type Err = std::convert::Infallible;
+    type Error = Error;
 
-    fn from_str(s: &str) -> StdResult<Self, Self::Err> {
-        Ok(
-            match <T as FromStr>::from_str(s) {
-                Ok(x) => Result(Ok(x)),
-                            // Wrap the error inside.
-                Err(e)   => Result(Err(e.into())),
-            }
-        )
+    fn try_from(value: Value) -> StdResult<Self, Self::Error> {
+        Ok(Result(<T as FromValue>::try_from(value)))
     }
 }
 
@@ -1079,7 +1120,7 @@ mod tests {
     // be something...
     #[test]
     fn parse_req_by_position_no_maybe_res_req_from_position_maybe_errors_missing_req() {
-        let (a, b) = Smargs::<(usize, Result<usize>,)>::with_definition(
+        let (a, b) = Smargs::<(usize, Result<usize>)>::with_definition(
             "Test program",
             [
                 ("A",    vec![], Kind::Required),
@@ -1089,10 +1130,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(a, 0);
+        let b_err = b.0.unwrap_err();
         assert!(matches!(
-            b.0.unwrap_err(),
-            Error::Missing(Smarg { desc, keys, kind: Kind::Required }),
-        ));
+            b_err,
+            Error::Missing(Smarg { kind: Kind::Maybe, .. }),
+        ), "{}", b_err);
     }
 
     // This seems (too much?) like a use-case...
@@ -1213,9 +1255,9 @@ mod tests {
 
         assert!(matches!(
             err,
-            Break { err: Error::UndefinedArgument(Arg { value: s, type_: Key::Position }), .. }
-                if s == "2",
-        ));
+            Break { err: Error::UndefinedArgument(Arg { value: ref s, type_: Key::Position }), .. }
+                if s == "1",
+        ), "{}", err);
     }
 
     #[test]
@@ -1234,13 +1276,18 @@ mod tests {
             err,
             Break {
                 err: Error::Duplicate {
-                    first: Arg { value: first, type_: Key::Short { group_size: 1 } },
-                    extra: Arg { value: extra, type_: Key::Short { group_size: 1 } },
+                    first: (
+                        Arg { value: ref fst_k, type_: Key::Short { group_size: 1 } },
+                        Value::Just(ref fst_v)
+                    ),
+                    extra: (
+                        Arg { value: ref ext_k, type_: Key::Short { group_size: 1 } },
+                        Value::Just(ref ext_v)
+                    ),
                 },
                 ..
-            }
-            if first == "0" && extra == "1",
-        ))
+            } if fst_k == "a" && fst_v == "0" && ext_k == "a" && ext_v == "1",
+        ), "{}", err);
     }
 
     #[test]
@@ -1303,9 +1350,9 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break { err: Error::Parsing { of: Smarg { .. }, from: Value::Just(s), failed_with: boxed_err }, .. }
+            Break { err: Error::Parsing { of: Smarg { .. }, from: Value::Just(ref s), failed_with: ref boxed_err }, .. }
                 if s == "-1" && boxed_err.is::<std::num::ParseIntError>(),
-        ));
+        ), "{}", err);
     }
 
     #[test]
