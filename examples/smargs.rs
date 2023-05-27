@@ -85,7 +85,7 @@ fn construct_email(name: String, age: usize, local_part: smargs::Result<NonEmpty
     }?;
 
     let local_part = local_part.0.or_else(|e|
-        if let smargs::Error::MissingRequired { .. } | smargs::Error::Dummy(_) = e {
+        if let smargs::Error::Missing(_) | smargs::Error::Dummy(_) = e {
             eprintln!("Constructing default local part for email");
             Ok(NonEmptyString(format!("{}.{}", name, age)))
         } else {
@@ -119,7 +119,7 @@ fn main() {
     let (name, age, local_part, domain, no_subscribe) = {
         // Catch this error in order to make demonstration of actual parsing easier.
         let x = match parse(std::env::args()) {
-            Err(smargs::Break { err: smargs::Error::MissingRequired { .. }, .. }) if use_example_args() => {
+            Err(smargs::Break { err: smargs::Error::Missing(_), .. }) if use_example_args() => {
                 // Use some hard-coded args for demonstration.
                 parse(example_args).expect("bad example args")
             },
