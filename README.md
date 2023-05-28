@@ -35,7 +35,7 @@ for i in 0..repeats {
   if verbose { eprintln!("{} repeats left", repeats - (i + 1)); }
 }
 
-# return Ok::<(), smargs::Break>(())
+# return Ok::<(), Box<smargs::Break>>(())
 ```
 
 ## ProgressBar

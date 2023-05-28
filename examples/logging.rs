@@ -11,7 +11,7 @@ fn main() {
     color_log!("Colored log message");
 
     // Highlight errors and successes.
-    println!("{}{} - Bad request: {}{}", RED, 400, RESET, "foo",);
+    println!("{}{} - Bad request: {}foo", RED, 400, RESET,);
     match Some(42) { Some(n) => println!("{}OK {}", GREEN, n), _ => { } }
 
     // Print a 8x7 heart ❤️.

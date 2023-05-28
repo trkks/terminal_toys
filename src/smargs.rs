@@ -89,12 +89,12 @@ where
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
         match &smarg.value {
             Value::None     => Err(Error::Missing(smarg)),
-            Value::Just(x)  => Ok(List(vec![<T as FromStr>::from_str(&x).map_err(|e| Error::Parsing { of: smarg, failed_with: Box::new(e) })?])),
+            Value::Just(x)  => Ok(List(vec![<T as FromStr>::from_str(x).map_err(|e| Error::Parsing { of: smarg, failed_with: Box::new(e) })?])),
             Value::List(xs) => {
-                let mut results: Vec<Option<StdResult<T, _>>> = xs.into_iter().map(|x| Some(<T as FromStr>::from_str(&x))).collect();
+                let mut results: Vec<Option<StdResult<T, _>>> = xs.iter().map(|x| Some(<T as FromStr>::from_str(x))).collect();
                 let mut found_error = None;
-                for i in 0..results.len() {
-                    if results[i].as_ref().unwrap().is_err() {
+                for (i, result) in results.iter().enumerate() {
+                    if result.as_ref().unwrap().is_err() {
                         found_error = Some(i);
                         break;
                     }
@@ -119,8 +119,8 @@ where
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
         match &smarg.value {
             Value::None     => Err(Error::Missing(smarg)),
-            Value::Just(x)  => <T as FromStr>::from_str(&x).map_err(|e| Error::Parsing { of: smarg.clone(), failed_with: Box::new(e) }),
-            Value::List(xs) => panic!("bad"),
+            Value::Just(x)  => <T as FromStr>::from_str(x).map_err(|e| Error::Parsing { of: smarg.clone(), failed_with: Box::new(e) }),
+            Value::List(_xs) => panic!("bad"),
         }
     }
 }
@@ -180,7 +180,7 @@ where
     /// 
     /// Note that the name of the program/command is assumed to be the first
     /// item in `args`.
-    pub fn parse(mut self, mut args: impl DoubleEndedIterator<Item = String>) -> StdResult<Ts, Break>
+    pub fn parse(mut self, mut args: impl DoubleEndedIterator<Item = String>) -> StdResult<Ts, Box<Break>>
     {
         if let Some(name) = args.next() {
             self.name = name;
@@ -218,7 +218,7 @@ where
     }
 
     /// Creates `T` based on a call to `std::env::args`.
-    pub fn from_env(self) -> StdResult<Ts, Break> {
+    pub fn from_env(self) -> StdResult<Ts, Box<Break>> {
         self.parse(std::env::args())
     }
 
@@ -305,7 +305,7 @@ where
         &self,
         args: impl DoubleEndedIterator<Item = String>,
         help: &Help
-    ) -> StdResult<Vec<Option<Value>>, Break> {
+    ) -> StdResult<Vec<Option<Value>>, Box<Break>> {
         let mut state: ValueParserState = ValueParserState::new(args, self.list.len());
         state.rindex = self.list.iter().position(|x| x.kind.is_required());
 
@@ -351,7 +351,7 @@ where
                         return Err(help.short_break(
                             Error::Duplicate {
                                 first: (
-                                    state.history[idx].as_mut().unwrap().pop().unwrap().clone(),
+                                    state.history[idx].as_mut().unwrap().pop().unwrap(),
                                     first_val
                                 ),
                                 extra: (
@@ -378,7 +378,7 @@ where
                 Key::Long | Key::Short { group_size: 1 } => {
                     // Save the handled arg and how it was got for future
                     // reference in case of errors.
-                    state.resolve_keyed_value(&self, arg, help)?;
+                    state.resolve_keyed_value(self, arg, help)?;
                 },
                 Key::Short { .. } => {
                     panic!("should be impossible to have matched '-'");
@@ -405,8 +405,7 @@ where
             .take()
             .unwrap_or_else(|| panic!("nothing in index {}", index));
 
-        let return_value = <T as FromSmarg>::from_smarg(smarg.to_owned())
-            .map_err(|err| err.into());
+        let return_value = <T as FromSmarg>::from_smarg(smarg.to_owned());
 
         // Update index.
         self.index += 1;
@@ -529,7 +528,7 @@ impl ValueParserState {
         }
     }
 
-    fn next_unsatisfied_required_position(&mut self, definitions: &Vec<Smarg>) {
+    fn next_unsatisfied_required_position(&mut self, definitions: &[Smarg]) {
         self.rindex = definitions
             .iter()
             .enumerate()
@@ -549,7 +548,7 @@ impl ValueParserState {
         smargs: &Smargs<Ts>,
         arg: Arg,
         help: &Help,
-    ) -> StdResult<(), Break> {
+    ) -> StdResult<(), Box<Break>> {
         let key_matched_index = *smargs.map
             .get(&arg.value)
             .ok_or_else(|| help.short_break(Error::UndefinedKey(arg.clone())))?;
@@ -570,7 +569,7 @@ impl ValueParserState {
                     return Err(help.short_break(
                         Error::Duplicate {
                             first: (
-                                self.history[key_matched_index].as_mut().unwrap().pop().unwrap().clone(),
+                                self.history[key_matched_index].as_mut().unwrap().pop().unwrap(),
                                 first_val,
                             ),
                             extra: (
@@ -610,11 +609,11 @@ impl ValueParserState {
                         return Err(help.short_break(
                             Error::Duplicate {
                                 first: (
-                                    self.history[key_matched_index].as_mut().unwrap().pop().unwrap().clone(),
+                                    self.history[key_matched_index].as_mut().unwrap().pop().unwrap(),
                                     first_val,
                                 ),
                                 extra: (
-                                    arg.clone(),
+                                    arg,
                                     self.values[key_matched_index].take().unwrap(),
                                 ),
                             }
@@ -654,12 +653,12 @@ pub enum ErrorKind {
 struct Help { short: String, long: String }
 
 impl Help {
-    fn short_break(&self, err: Error) -> Break {
-        Break { err, help: self.short.clone() }
+    fn short_break(&self, err: Error) -> Box<Break> {
+        Box::new(Break { err, help: self.short.clone() })
     }
 
-    fn long_break(&self, err: Error) -> Break {
-        Break { err, help: self.long.clone() }
+    fn long_break(&self, err: Error) -> Box<Break> {
+        Box::new(Break { err, help: self.long.clone() })
     }
 }
 
@@ -859,7 +858,7 @@ tryfrom_impl!(T1,T2,T3,T4,T5,T6,T7,T8);
 
 #[cfg(test)]
 mod tests {
-    use super::{Break, Error, ErrorKind, Smargs, Smarg, Value, Key, Arg, Kind, List, Result};
+    use super::{Break, Error, Smargs, Smarg, Value, Key, Arg, Kind, List, Result};
 
     // NOTE: Naming conventions:
     // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
@@ -1048,7 +1047,7 @@ mod tests {
             .parse("x -a 0 -a 1".split(' ').map(String::from))
             .unwrap();
 
-        assert_eq!(a.0.get(0), Some(&0));
+        assert_eq!(a.0.first(), Some(&0));
         assert_eq!(a.0.get(1), Some(&1));
     }
 
@@ -1063,7 +1062,7 @@ mod tests {
             .parse("x 0 -a 1".split(' ').map(String::from))
             .unwrap();
 
-        assert_eq!(a.0.get(0), Some(&0));
+        assert_eq!(a.0.first(), Some(&0));
         assert_eq!(a.0.get(1), Some(&1));
     }
 
@@ -1127,7 +1126,7 @@ mod tests {
             .unwrap_err();
         
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::Help, help }
                 if !help.is_empty(),
         ));
@@ -1145,7 +1144,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::Help, help }
                 if !help.is_empty(),
         ));
@@ -1163,7 +1162,7 @@ mod tests {
             .unwrap_err();
         
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::Help, help }
                 if !help.is_empty(),
         ));
@@ -1182,7 +1181,7 @@ mod tests {
             .unwrap_err();
         
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::Missing(Smarg { desc, keys, kind: Kind::Required, value: Value::None }), .. } if desc == "A" && keys[0] == "a",
         ));
     }
@@ -1199,7 +1198,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::UndefinedArgument(Arg { value: s, type_: Key::Position }), .. }
                 if s == "2",
         ));
@@ -1218,7 +1217,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::UndefinedArgument(Arg { value: ref s, type_: Key::Position }), .. }
                 if s == "1",
         ), "{}", err);
@@ -1237,7 +1236,7 @@ mod tests {
             .unwrap_err();
         
         assert!(matches!(
-            err,
+            *err,
             Break {
                 err: Error::Duplicate {
                     first: (
@@ -1265,7 +1264,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::Missing(Smarg { kind: Kind::Required, .. }), .. },
         ));
     }
@@ -1281,7 +1280,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::Missing(Smarg { kind: Kind::Optional(_), .. }), .. },
         ));
     }
@@ -1297,7 +1296,7 @@ mod tests {
             .unwrap_err();
         
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::UndefinedKey(Arg { value: s, type_: Key::Short { group_size: 1 } }), .. } if s == "b",
         ));
     }
@@ -1313,7 +1312,7 @@ mod tests {
             .unwrap_err();
         
         assert!(matches!(
-            err,
+            *err,
             Break { err: Error::Parsing { of: Smarg { value: Value::Just(ref s), .. }, failed_with: ref boxed_err }, .. }
                 if s == "-1" && boxed_err.is::<std::num::ParseIntError>(),
         ), "{}", err);

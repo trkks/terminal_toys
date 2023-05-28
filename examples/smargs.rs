@@ -22,7 +22,7 @@ impl std::error::Error for StringIsEmptyError { }
 impl FromStr for NonEmptyString {
     type Err = StringIsEmptyError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() > 0 {
+        if !s.is_empty() {
             Ok(Self(<String as FromStr>::from_str(s).unwrap()))
         } else {
             Err(StringIsEmptyError)
@@ -45,7 +45,7 @@ impl std::error::Error for TextErrorMessage { }
 /// Custom output type.
 type RegistrationInfo = (String, usize, smargs::Result<NonEmptyString>, String, bool);
 
-fn parse(args: impl DoubleEndedIterator<Item=String>) -> Result<RegistrationInfo, smargs::Break> {
+fn parse(args: impl DoubleEndedIterator<Item=String>) -> Result<RegistrationInfo, Box<smargs::Break>> {
     smärgs!(
         "Register for a service",
         (
@@ -77,8 +77,8 @@ fn use_example_args() -> bool {
 fn construct_email(name: String, age: usize, local_part: smargs::Result<NonEmptyString>, domain: String) -> Result<String, smargs::Error> {
     let split = domain.rsplit_once('.');
     let (domain, tld) = match split {
-        Some((l, r)) if l.len() > 0 && r.len() > 0 => Ok((l, r)),
-        Some((l, _)) if l.len() > 0 => Ok((l, "com")),
+        Some((l, r)) if !l.is_empty() && !r.is_empty() => Ok((l, r)),
+        Some((l, _)) if !l.is_empty() => Ok((l, "com")),
         _ => Err(smargs::Error::Dummy(Box::new(
             TextErrorMessage(format!("malformed domain: '{}'", domain))
         ))),
@@ -119,7 +119,7 @@ fn main() {
     let (name, age, local_part, domain, no_subscribe) = {
         // Catch this error in order to make demonstration of actual parsing easier.
         let x = match parse(std::env::args()) {
-            Err(smargs::Break { err: smargs::Error::Missing(_), .. }) if use_example_args() => {
+            Err(e) if matches!(*e, smargs::Break { err: smargs::Error::Missing(_), .. }) && use_example_args() => {
                 // Use some hard-coded args for demonstration.
                 parse(example_args).expect("bad example args")
             },
