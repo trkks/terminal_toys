@@ -85,7 +85,7 @@ fn construct_email(name: String, age: usize, local_part: smargs::Result<NonEmpty
     }?;
 
     let local_part = local_part.0.or_else(|e|
-        if let smargs::Error::Missing(_) | smargs::Error::Dummy(_) = e {
+        if let smargs::Error::Missing(_) | smargs::Error::Parsing { .. }= e {
             eprintln!("Constructing default local part for email");
             Ok(NonEmptyString(format!("{}.{}", name, age)))
         } else {

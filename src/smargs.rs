@@ -32,6 +32,8 @@ impl Display for Arg {
 #[derive(Debug, Clone)]
 pub enum Key {
     Position,
+    // TODO: Use the field for referring to the _original_ group where the key
+    // eventually gets split from.
     Short { group_size: usize },
     Long,
 }
@@ -75,23 +77,19 @@ impl fmt::Display for Value {
     }
 }
 
-pub trait FromValue: Sized {
-    type Err;
-
-    fn from_value(value: Value) -> StdResult<Self, Self::Err>;
+pub trait FromSmarg: Sized {
+    fn from_smarg(smarg: Smarg) -> StdResult<Self, Error>;
 }
 
-impl<T> FromValue for List<T>
+impl<T> FromSmarg for List<T>
 where
     T: FromStr + fmt::Debug,
     <T as FromStr>::Err: error::Error + 'static,
 {
-    type Err = Error;
-
-    fn from_value(value: Value) -> StdResult<Self, Self::Err> {
-        match value {
-            Value::None     => Err(Error::Placeholder),
-            Value::Just(x)  => Ok(List(vec![<T as FromStr>::from_str(&x).map_err(|e| Error::Dummy(Box::new(e)))?])),
+    fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
+        match &smarg.value {
+            Value::None     => Err(Error::Missing(smarg)),
+            Value::Just(x)  => Ok(List(vec![<T as FromStr>::from_str(&x).map_err(|e| Error::Parsing { of: smarg, failed_with: Box::new(e) })?])),
             Value::List(xs) => {
                 let mut results: Vec<Option<StdResult<T, _>>> = xs.into_iter().map(|x| Some(<T as FromStr>::from_str(&x))).collect();
                 let mut found_error = None;
@@ -103,7 +101,7 @@ where
                 }
                 if let Some(i) = found_error {
                     let error = results[i].take().unwrap().unwrap_err();
-                    Err(Error::Dummy(Box::new(error)))
+                    Err(Error::Parsing { of: smarg, failed_with: Box::new(error) })
                 } else {
                     let values = results.into_iter().map(|x| x.unwrap().unwrap()).collect();
                     Ok(List(values))
@@ -113,17 +111,15 @@ where
     }
 }
 
-impl<T> FromValue for T
+impl<T> FromSmarg for T
 where
     T: FromStr,
     <T as FromStr>::Err: error::Error + 'static,
 {
-    type Err = Error;
-
-    fn from_value(value: Value) -> StdResult<Self, Self::Err> {
-        match value {
-            Value::None     => Err(Error::Placeholder),
-            Value::Just(x)  => <T as FromStr>::from_str(&x).map_err(|e| Error::Dummy(Box::new(e))),
+    fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
+        match &smarg.value {
+            Value::None     => Err(Error::Missing(smarg)),
+            Value::Just(x)  => <T as FromStr>::from_str(&x).map_err(|e| Error::Parsing { of: smarg.clone(), failed_with: Box::new(e) }),
             Value::List(xs) => panic!("bad"),
         }
     }
@@ -151,15 +147,14 @@ pub struct Smargs<Ts> {
     /// Name of the program (from the first item in argument list).
     name: String,
     description: String,
-    /// Mapping of positions to argument definitions.
+    /// Mapping of positions to argument definitions and given arguments
+    /// stored for parsing later.
     list: Vec<Smarg>,
     /// Mapping of keys to to positions.
     map: HashMap<String, usize>,
     /// NOTE: This is here in order to support the `smärgs`-macro implementing
     /// `TryFrom<Smargs<_>> for CustomOutput`.
     output: PhantomData<Ts>,
-    /// Field where the given arguments are stored for parsing later.
-    values: Vec<Value>,
 }
 
 impl<Ts> Smargs<Ts>
@@ -174,7 +169,7 @@ where
     ) -> Self {
         let mut smargs = Smargs::new(desc);
         for (s, ks, k) in definition {
-            smargs.push(Smarg { desc: s, keys: ks, kind: k});
+            smargs.push(Smarg { desc: s, keys: ks, kind: k, value: Value::None });
         }
         smargs
     }
@@ -214,9 +209,10 @@ where
             value.replace(fillin);
         }
 
-
         // Update self with the resolved values.
-        self.values = values.into_iter().map(|x| x.expect("not all values handled")).collect();
+        for (i, value) in values.into_iter().map(|x| x.expect("not all values handled")).enumerate() {
+            self.list[i].value = value;
+        }
 
         Ts::try_from(self).map_err(|err| help.short_break(err))
     }
@@ -236,7 +232,7 @@ where
     /// parsing will be interrupted and return an automatically generated help
     /// message.
     pub fn help_keys(mut self, keys: Vec<&'static str>) -> Self {
-        self.push(Smarg { desc: "Show this help message", keys, kind: Kind::Help });
+        self.push(Smarg { desc: "Show this help message", keys, kind: Kind::Help, value: Value::None });
 
         self
     }
@@ -399,28 +395,18 @@ where
     /// Parse into the type `T` the next value of arg defined in running order.
     pub fn parse_next<T>(&mut self) -> StdResult<T, Error>
     where
-        T: FromValue,
-        <T as FromValue>::Err: Into<Error>,
+        T: FromSmarg,
     {
         // TODO This seems unnecessarily complex...
         let index = self.index;
-        let value = self
-            .values
+        let smarg = self
+            .list
             .get(index)
             .take()
             .unwrap_or_else(|| panic!("nothing in index {}", index));
 
-        let return_value = <T as FromValue>::from_value(value.to_owned())
-            .map_err(|err| err.into())
-            .map_err(|err|
-                if let Error::Dummy(err_box) = err {
-                    // Fill in the dummy error with information held at this
-                    // level about the failed arg's definition.
-                    Error::Parsing { of: self.list[index].clone(), from: value.clone(), failed_with: err_box }
-                } else {
-                    err
-                }
-            );
+        let return_value = <T as FromSmarg>::from_smarg(smarg.to_owned())
+            .map_err(|err| err.into());
 
         // Update index.
         self.index += 1;
@@ -439,7 +425,6 @@ where
             list: Vec::new(),
             map: HashMap::new(),
             output: PhantomData,
-            values: Vec::new(),
         }
     }
 
@@ -690,10 +675,9 @@ impl error::Error for Break { }
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
 pub enum Error {
-    // TODO: Might need another Error-enum alltogether for conversions from
-    // Value...
-    Placeholder,
-    /// For converting from any (user-defined) error to this.
+    /// Convenience for users working with `Error`. Wrap the user-defined
+    /// `error` in `Error::Dummy` so it can be passed around like other `Error`
+    /// variants.
     Dummy(Box<dyn error::Error>),
     /// Found an unexpected extra match for `Smarg`.
     Duplicate { first: (Arg, Value), extra: (Arg, Value) },
@@ -702,18 +686,11 @@ pub enum Error {
     /// A matching value for `Smarg` was expected but is missing.
     Missing(Smarg),
     /// Parsing from `Value` as matched to `Smarg` failed.
-    Parsing { of: Smarg, from: Value, failed_with: Box<dyn error::Error> },
+    Parsing { of: Smarg, failed_with: Box<dyn error::Error> },
     /// No match found for given argument.
     UndefinedArgument(Arg),
     /// No match found for given key.
     UndefinedKey(Arg),
-}
-
-impl Error {
-    /// Wrap the `error` in `Self::Dummy` by boxing it.
-    pub fn dummy<E: error::Error + 'static>(error: E) -> Self {
-        Self::Dummy(Box::new(error))
-    }
 }
 
 /// Select between generic or argument-specific error messages.
@@ -727,8 +704,7 @@ impl fmt::Display for Break {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
-            Self::Placeholder => "Placeholder error".to_owned(),
-            Self::Dummy(e) => format!("{}, baka", e),
+            Self::Dummy(error) => format!("{}, baka.", error),
             Self::Duplicate { first, extra } => {
                 format!(
                     "already matched {}: {} but then found {}: {}",
@@ -737,10 +713,10 @@ impl fmt::Display for Error {
             },
             Self::Help => "help".to_owned(),
             Self::Missing(smarg) => format!("argument missing for {}", smarg),
-            Self::Parsing { of, from, failed_with } => {
+            Self::Parsing { of, failed_with } => {
                 format!(
-                    "failed to parse {} from '{}': {:?}",
-                    of, from, failed_with
+                    "failed to parse {}: {:?}",
+                    of, failed_with
                 )
             },
             Self::UndefinedArgument(arg) => format!("extra argument '{}'", arg),
@@ -751,14 +727,14 @@ impl fmt::Display for Error {
     }
 }
 
-/// Contains information about a single _definition_ (or declaration?) of an
-/// argument i.e., this is not an abstraction for the concrete things that a
-/// user would submit as arguments for a program.
+/// Contains information about a definition (or declaration?) of
+/// and the concrete value assigned to a program argument.
 #[derive(Debug, Clone)]
 pub struct Smarg {
     pub desc: &'static str,
     pub keys: Vec<&'static str>,
     pub kind: Kind,
+    pub value: Value
 }
 
 impl Display for Smarg {
@@ -835,26 +811,14 @@ pub struct Result<T>(pub StdResult<T, Error>);
 /// Generic implementation for all types that implement `FromStr` but
 /// into the Result-wrapper for returning errors from parsing specific
 /// arguments.
-impl<T> FromValue for Result<T>
+impl<T> FromSmarg for Result<T>
 where
-    T: FromValue,
-    <T as FromValue>::Err: Into<Error>,
+    T: FromSmarg,
 {
-    // The Result-wrapper will always be constructed (containing the value or
-    // an error), so "failing to parse" it from string is impossible.
-    type Err = Error;
-
-    fn from_value(value: Value) -> StdResult<Self, Self::Err> {
-        Ok(Result(<T as FromValue>::from_value(value).map_err(|err| err.into())))
-    }
-}
-
-/// This generic implementation prevents implementing `std::error::Error` for
-/// `smargs::Error`, but probably is a smaller price to pay than having to
-/// manually add support for each.
-impl<E: error::Error + 'static> From<E> for Error {
-    fn from(value: E) -> Self {
-        Self::dummy(value)
+    fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
+        // The Result-wrapper will always be constructed (containing the value or
+        // an error), so "failing to parse" it from string is impossible.
+        Ok(Result(<T as FromSmarg>::from_smarg(smarg)))
     }
 }
 
@@ -874,11 +838,10 @@ macro_rules! tryfrom_impl {
         impl<$( $t ),*> TryFrom<Smargs<Self>> for ( $( $t, )* )
         where
             $(
-                $t: FromValue,
-                <$t as FromValue>::Err: Into<Error>,
+                $t: FromSmarg,
             )* {
             type Error = Error;
-            fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
+            fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Error> {
                 Ok( ($( smargs.parse_next::<$t>()?, )*) )
             }
         }       
@@ -1134,7 +1097,7 @@ mod tests {
         let b_err = b.0.unwrap_err();
         assert!(matches!(
             b_err,
-            Error::Missing(Smarg { desc, ref keys, kind: Kind::Maybe }) if desc == "B" && keys[0] == "b",
+            Error::Missing(Smarg { desc, ref keys, kind: Kind::Maybe, value: Value::None }) if desc == "B" && keys[0] == "b",
         ), "{}", b_err);
     }
 
@@ -1220,7 +1183,7 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break { err: Error::Missing(Smarg { desc, keys, kind: Kind::Required }), .. },
+            Break { err: Error::Missing(Smarg { desc, keys, kind: Kind::Required, value: Value::None }), .. } if desc == "A" && keys[0] == "a",
         ));
     }
 
@@ -1351,7 +1314,7 @@ mod tests {
         
         assert!(matches!(
             err,
-            Break { err: Error::Parsing { of: Smarg { .. }, from: Value::Just(ref s), failed_with: ref boxed_err }, .. }
+            Break { err: Error::Parsing { of: Smarg { value: Value::Just(ref s), .. }, failed_with: ref boxed_err }, .. }
                 if s == "-1" && boxed_err.is::<std::num::ParseIntError>(),
         ), "{}", err);
     }

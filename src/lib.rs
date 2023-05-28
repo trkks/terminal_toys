@@ -239,7 +239,7 @@ macro_rules! smärgs {
                 unwrap_parse,
                 container_push,
                 unwrap_push,
-                smargs::{Smargs, Smarg, Kind, Error}
+                smargs::{Smargs, Smarg, Kind, Error, Value}
             };
             // Implement parsing into the given __custom__ (needed for passing
             // it to Smargs<Ts>) output type (with special Result-type when so
@@ -267,7 +267,7 @@ macro_rules! smärgs {
             use terminal_toys::{
                 container_push,
                 unwrap_push,
-                smargs::{Smargs, Smarg, Kind, Error}
+                smargs::{Smargs, Smarg, Kind, Error, Value}
             };
 
             let mut smargs = Smargs::new($program_desc);
@@ -290,7 +290,7 @@ macro_rules! unwrap_parse {
 #[macro_export]
 macro_rules! unwrap_push {
     ( $smargs:expr, $arg_desc:literal, $keys:expr, $kind:expr ) => {
-        $smargs.push(Smarg { desc: $arg_desc, keys: $keys.to_vec(), kind: $kind });
+        $smargs.push(Smarg { desc: $arg_desc, keys: $keys.to_vec(), kind: $kind, value: Value::None });
     };
 }
 
