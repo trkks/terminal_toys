@@ -75,10 +75,10 @@ impl fmt::Display for Value {
     }
 }
 
-pub trait FromValue {
-    type Error;
+pub trait FromValue: Sized {
+    type Err;
 
-    fn try_from(value: Value) -> StdResult<Self, Error> where Self: Sized;
+    fn from_value(value: Value) -> StdResult<Self, Self::Err>;
 }
 
 impl<T> FromValue for List<T>
@@ -86,9 +86,9 @@ where
     T: FromStr + fmt::Debug,
     <T as FromStr>::Err: error::Error + 'static,
 {
-    type Error = Error;
+    type Err = Error;
 
-    fn try_from(value: Value) -> StdResult<Self, Error> {
+    fn from_value(value: Value) -> StdResult<Self, Self::Err> {
         match value {
             Value::None     => Err(Error::Placeholder),
             Value::Just(x)  => Ok(List(vec![<T as FromStr>::from_str(&x).map_err(|e| Error::Dummy(Box::new(e)))?])),
@@ -118,9 +118,9 @@ where
     T: FromStr,
     <T as FromStr>::Err: error::Error + 'static,
 {
-    type Error = Error;
+    type Err = Error;
 
-    fn try_from(value: Value) -> StdResult<Self, Error> {
+    fn from_value(value: Value) -> StdResult<Self, Self::Err> {
         match value {
             Value::None     => Err(Error::Placeholder),
             Value::Just(x)  => <T as FromStr>::from_str(&x).map_err(|e| Error::Dummy(Box::new(e))),
@@ -400,7 +400,7 @@ where
     pub fn parse_next<T>(&mut self) -> StdResult<T, Error>
     where
         T: FromValue,
-        <T as FromValue>::Error: Into<Error>,
+        <T as FromValue>::Err: Into<Error>,
     {
         // TODO This seems unnecessarily complex...
         let index = self.index;
@@ -410,7 +410,8 @@ where
             .take()
             .unwrap_or_else(|| panic!("nothing in index {}", index));
 
-        let return_value = <T as FromValue>::try_from(value.to_owned())
+        let return_value = <T as FromValue>::from_value(value.to_owned())
+            .map_err(|err| err.into())
             .map_err(|err|
                 if let Error::Dummy(err_box) = err {
                     // Fill in the dummy error with information held at this
@@ -837,14 +838,14 @@ pub struct Result<T>(pub StdResult<T, Error>);
 impl<T> FromValue for Result<T>
 where
     T: FromValue,
-    <T as FromValue>::Error: Into<Error>,
+    <T as FromValue>::Err: Into<Error>,
 {
     // The Result-wrapper will always be constructed (containing the value or
     // an error), so "failing to parse" it from string is impossible.
-    type Error = Error;
+    type Err = Error;
 
-    fn try_from(value: Value) -> StdResult<Self, Self::Error> {
-        Ok(Result(<T as FromValue>::try_from(value)))
+    fn from_value(value: Value) -> StdResult<Self, Self::Err> {
+        Ok(Result(<T as FromValue>::from_value(value).map_err(|err| err.into())))
     }
 }
 
@@ -874,7 +875,7 @@ macro_rules! tryfrom_impl {
         where
             $(
                 $t: FromValue,
-                <$t as FromValue>::Error: Into<Error>,
+                <$t as FromValue>::Err: Into<Error>,
             )* {
             type Error = Error;
             fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Self::Error> {
@@ -1119,7 +1120,7 @@ mod tests {
     // NOTE: Maybe "maybe" might be a bad name as the value needs to eventually
     // be something...
     #[test]
-    fn parse_req_by_position_no_maybe_res_req_from_position_maybe_errors_missing_req() {
+    fn parse_req_by_position_no_maybe_res_req_from_position_maybe_errors_missing() {
         let (a, b) = Smargs::<(usize, Result<usize>)>::with_definition(
             "Test program",
             [
@@ -1133,7 +1134,7 @@ mod tests {
         let b_err = b.0.unwrap_err();
         assert!(matches!(
             b_err,
-            Error::Missing(Smarg { kind: Kind::Maybe, .. }),
+            Error::Missing(Smarg { desc, ref keys, kind: Kind::Maybe }) if desc == "B" && keys[0] == "b",
         ), "{}", b_err);
     }
 
