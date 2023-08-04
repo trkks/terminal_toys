@@ -1,32 +1,30 @@
 use std::collections::VecDeque;
 
 
+type Board = Vec<GameObject>;
+
 pub struct SnakeGame {
-    board: Vec<char>,
+    board: Board,
     board_size: V2,
     snake: Vec<V2>,
     apple: V2,
     dir: V2,
-    horizontal_edge: String,
     input_queue: VecDeque<Input>,
 }
 
 impl SnakeGame {
     pub fn new(width: usize, height: usize) -> Result<Self, String> { 
-        let board = vec!['.'; width * height];
+        let board = vec![GameObject::Floor; width * height];
         let board_size = V2 { x: width as i32, y: height as i32 };
         let snake = vec![V2 { x: 5, y: 5}, V2 { x: 6, y: 5}];
         let apple = V2 { x: 9, y: 3 };
         let dir = V2 { x: 0, y: -1 };
-        let horizontal_edge = String::from_utf8(
-            std::iter::repeat(b'#').take(board_size.x as usize + 2).collect::<Vec<u8>>()
-        )
-        .unwrap();
+
         let input_queue = VecDeque::new();
 
         Ok(
             Self {
-                board, board_size, snake, apple, dir, horizontal_edge, input_queue,
+                board, board_size, snake, apple, dir, input_queue,
             }
         )
     }
@@ -35,7 +33,7 @@ impl SnakeGame {
         self.input_queue.push_back(input);
     }
 
-    pub fn next(&mut self) -> Result<String, String> {
+    pub fn next_frame(&mut self) -> Result<(), &'static str> {
         let input = self.input_queue
             .pop_front()
             .unwrap_or(Input::Undefined);
@@ -91,42 +89,25 @@ impl SnakeGame {
         }
 
         for part in self.board.iter_mut() {
-            *part = '.';
+            *part = GameObject::Floor;
         }
-        self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = 'H';
+        self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = GameObject::Head;
         for p in self.snake.iter().skip(1) {
-            self.board[(p.y * self.board_size.x as i32 + p.x) as usize] = 'S';
+            self.board[(p.y * self.board_size.x as i32 + p.x) as usize] = GameObject::Body;
         }
-        self.board[(self.apple.y * self.board_size.x as i32 + self.apple.x) as usize] = 'A';
-
-        let render = |board: &[char], horizontal_edge: &str, board_size: V2| {
-            let mut view =
-                String::with_capacity(board.len() + board_size.x as usize * 2 + board_size.y as usize * 3);
-            for line in board.chunks(board_size.x as usize) {
-                view.push('#');
-                line.iter().for_each(|&c| view.push(c));
-                view.push('#');
-                view.push('\n');
-            }
-
-            format!(
-                "{}\n{}{}\x1b[{}D\x1b[{}A",
-                // Save upper left corner for showing the input
-                // (...and thus wrapping the top edge nicely).
-                &horizontal_edge[1..],
-                view,
-                &horizontal_edge,
-                board_size.x + 2, board_size.y + 1,
-            )
-        };
+        self.board[(self.apple.y * self.board_size.x as i32 + self.apple.x) as usize] = GameObject::Apple;
         let snake_ate_self = self.snake[1..].iter()
             .any(|p| p.x == self.snake[0].x && p.y == self.snake[0].y);
         if snake_ate_self {
-            self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = 'X';
-            return Err(format!("{}\nGame over", render(&self.board, &self.horizontal_edge, self.board_size)));
+            self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = GameObject::Overlap;
+            return Err("Game over");
         }
 
-        Ok(render(&self.board, &self.horizontal_edge, self.board_size))
+        Ok(())
+    }
+
+    pub fn board(&self) -> &Board {
+        &self.board
     }
 }
 
@@ -149,4 +130,13 @@ pub enum Input {
     Down,
     Left,
     Right,
+}
+
+#[derive(Clone)]
+pub enum GameObject {
+    Apple,
+    Body,
+    Floor,
+    Head,
+    Overlap,
 }
