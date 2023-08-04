@@ -1,121 +1,9 @@
 use std::collections::VecDeque;
-use std::io::Write;
-use std::sync::{Arc, Mutex, mpsc};
-use std::thread;
-use std::time;
 
 
-extern "C" {
-    #[allow(dead_code)]
-    fn dequeue_input() -> Input;
-}
-
-pub fn play() {
-    let (input_sender, input_receiver) = mpsc::channel();
-    let (quit_sender, quit_receiver) = mpsc::channel();
-    let quit_sender = Arc::new(Mutex::new(quit_sender));
-    let quit_receiver = Arc::new(Mutex::new(quit_receiver));
-
-    let input = InputHandler::new(
-        input_sender,
-        Arc::clone(&quit_sender),
-        Arc::clone(&quit_receiver),
-    );
-    let logic = LogicHandler::new(
-        quit_sender,
-        input_receiver,
-        quit_receiver,
-    );
-
-    let _ = input.0.join();
-    let _ = logic.0.join();
-}
-
-const W: usize = 20;
-const H: usize = 10;
-
-struct InputHandler(thread::JoinHandle<()>);
-impl InputHandler {
-    fn new(
-        input_sender: mpsc::Sender<Input>,
-        quit_sender: Arc<Mutex<mpsc::Sender<()>>>,
-        quit_rec: Arc<Mutex<mpsc::Receiver<()>>>,
-    ) -> Self {
-        let stdin = std::io::stdin();
-        let handle = thread::spawn(move || loop {
-            if let Ok(()) = quit_rec.lock().unwrap().try_recv() {
-                break;
-            }
-            let mut s = String::new();
-            stdin.read_line(&mut s).unwrap();  // Blocks
-            // Undo the RETURN resulted from input by moving to previous line.
-            print!("\x1b[F");
-            let _ = std::io::stdout().flush();
-
-            let input = match &s.as_str().trim().to_lowercase()[..] {
-                "w" => Input::Up,
-                "s" => Input::Down,
-                "a" => Input::Left,
-                "d" => Input::Right,
-                _   => Input::Undefined,
-            };
-            if let Input::Undefined = input {
-                if s.contains('q') {
-                    quit_sender.lock().unwrap().send(()).unwrap();
-                    // Move back to the bottom.
-                    println!("\x1b[{}E", H + 1);
-                    break;
-                }
-            } else if input_sender.send(input).is_err() {
-                break;
-            }
-        });
-
-        Self(handle)
-    }
-}
-struct LogicHandler(thread::JoinHandle<()>);
-impl LogicHandler {
-    fn new(
-        quit_sender: Arc<Mutex<mpsc::Sender<()>>>,
-        input_rec: mpsc::Receiver<Input>,
-        quit_rec: Arc<Mutex<mpsc::Receiver<()>>>,
-    ) -> Self {
-        let mut game = SnakeGame::new().unwrap();
-        let logic_handle = thread::spawn(move || loop {
-            if quit_rec.lock().unwrap().try_recv().is_ok() {
-                break;
-            }
-            let input = match input_rec.try_recv() {
-                Ok(x) => x,
-                _ => Input::Undefined,
-            };
-            game.queue_input(input);
-            let draw = |x: String| {
-                let stdout = std::io::stdout();
-                let mut stdout_handle = stdout.lock();
-                let _ = stdout_handle.write(x.as_bytes());
-                let _ = stdout_handle.flush();
-            };
-            match game.next() {
-                Ok(x) => draw(x),
-                Err(e) => {
-                    draw(e);
-                    quit_sender.lock().unwrap().send(()).unwrap();
-                    break;
-                },
-            };
-            thread::sleep(time::Duration::from_millis(100)); 
-        });
-
-        Self(logic_handle)
-    }
-}
-
-type Board = [char; W * H];
-
-struct SnakeGame {
-    board: Board,
+pub struct SnakeGame {
+    board: Vec<char>,
+    board_size: V2,
     snake: Vec<V2>,
     apple: V2,
     dir: V2,
@@ -124,29 +12,30 @@ struct SnakeGame {
 }
 
 impl SnakeGame {
-    fn new() -> Result<Self, String> { 
-        let board = ['.'; W * H];
+    pub fn new(width: usize, height: usize) -> Result<Self, String> { 
+        let board = vec!['.'; width * height];
+        let board_size = V2 { x: width as i32, y: height as i32 };
         let snake = vec![V2 { x: 5, y: 5}, V2 { x: 6, y: 5}];
         let apple = V2 { x: 9, y: 3 };
         let dir = V2 { x: 0, y: -1 };
         let horizontal_edge = String::from_utf8(
-            std::iter::repeat(b'#').take(W + 2).collect::<Vec<u8>>()
+            std::iter::repeat(b'#').take(board_size.x as usize + 2).collect::<Vec<u8>>()
         )
         .unwrap();
         let input_queue = VecDeque::new();
 
         Ok(
             Self {
-                board, snake, apple, dir, horizontal_edge, input_queue,
+                board, board_size, snake, apple, dir, horizontal_edge, input_queue,
             }
         )
     }
 
-    fn queue_input(&mut self, input: Input) {
+    pub fn queue_input(&mut self, input: Input) {
         self.input_queue.push_back(input);
     }
 
-    fn next(&mut self) -> Result<String, String> {
+    pub fn next(&mut self) -> Result<String, String> {
         let input = self.input_queue
             .pop_front()
             .unwrap_or(Input::Undefined);
@@ -160,11 +49,12 @@ impl SnakeGame {
 
         let mut last_head = self.snake[0];
         self.snake[0] = {
+            let (width, height) = (self.board_size.x as i32, self.board_size.y as i32);
             let keep_in_bounds = |p: &mut V2| {
-                if p.x < 0              { p.x += W as i32; }
-                else if W as i32 <= p.x { p.x -= W as i32; }
-                if p.y < 0              { p.y += H as i32; }
-                else if H as i32 <= p.y { p.y -= H as i32; }
+                if p.x < 0            { p.x += width;  }
+                else if width <= p.x  { p.x -= width;  }
+                if p.y < 0            { p.y += height; }
+                else if height <= p.y { p.y -= height; }
             };
 
             let mut new_p = self.snake[0].add(&self.dir);
@@ -196,23 +86,23 @@ impl SnakeGame {
 
         if self.snake[0].x == self.apple.x && self.snake[0].y == self.apple.y {
             self.snake.push(self.snake[self.snake.len()-1]);
-            self.apple.x = (rand::random::<f32>() * W as f32) as i32;
-            self.apple.y = (rand::random::<f32>() * H as f32) as i32;
+            self.apple.x = (rand::random::<f32>() * self.board_size.x as f32) as i32;
+            self.apple.y = (rand::random::<f32>() * self.board_size.y as f32) as i32;
         }
 
         for part in self.board.iter_mut() {
             *part = '.';
         }
-        self.board[(self.snake[0].y * W as i32 + self.snake[0].x) as usize] = 'H';
+        self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = 'H';
         for p in self.snake.iter().skip(1) {
-            self.board[(p.y * W as i32 + p.x) as usize] = 'S';
+            self.board[(p.y * self.board_size.x as i32 + p.x) as usize] = 'S';
         }
-        self.board[(self.apple.y * W as i32 + self.apple.x) as usize] = 'A';
+        self.board[(self.apple.y * self.board_size.x as i32 + self.apple.x) as usize] = 'A';
 
-        let render = |board: &[char], horizontal_edge: &str| {
+        let render = |board: &[char], horizontal_edge: &str, board_size: V2| {
             let mut view =
-                String::with_capacity(board.len() + W * 2 + H * 3);
-            for line in board.chunks(W) {
+                String::with_capacity(board.len() + board_size.x as usize * 2 + board_size.y as usize * 3);
+            for line in board.chunks(board_size.x as usize) {
                 view.push('#');
                 line.iter().for_each(|&c| view.push(c));
                 view.push('#');
@@ -226,17 +116,17 @@ impl SnakeGame {
                 &horizontal_edge[1..],
                 view,
                 &horizontal_edge,
-                W + 2, H + 1,
+                board_size.x + 2, board_size.y + 1,
             )
         };
         let snake_ate_self = self.snake[1..].iter()
             .any(|p| p.x == self.snake[0].x && p.y == self.snake[0].y);
         if snake_ate_self {
-            self.board[(self.snake[0].y * W as i32 + self.snake[0].x) as usize] = 'X';
-            return Err(format!("{}\nGame over", render(&self.board, &self.horizontal_edge)));
+            self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = 'X';
+            return Err(format!("{}\nGame over", render(&self.board, &self.horizontal_edge, self.board_size)));
         }
 
-        Ok(render(&self.board, &self.horizontal_edge))
+        Ok(render(&self.board, &self.horizontal_edge, self.board_size))
     }
 }
 
@@ -253,7 +143,7 @@ impl V2 {
 }
 
 #[repr(C)]
-enum Input {
+pub enum Input {
     Undefined,
     Up,
     Down,
