@@ -1,7 +1,14 @@
+use std::collections::VecDeque;
+use std::io::Write;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time;
-use std::sync::{Arc, Mutex, mpsc};
-use std::io::Write;
+
+
+extern "C" {
+    #[allow(dead_code)]
+    fn dequeue_input() -> Input;
+}
 
 pub fn play() {
     let (input_sender, input_receiver) = mpsc::channel();
@@ -74,14 +81,7 @@ impl LogicHandler {
         input_rec: mpsc::Receiver<Input>,
         quit_rec: Arc<Mutex<mpsc::Receiver<()>>>,
     ) -> Self {
-        let mut board: [char;W*H] = ['.';W*H];
-        let mut snake = vec![V2 { x: 5, y: 5}, V2 { x: 6, y: 5}];
-        let mut apple = V2 { x: 9, y: 3 };
-        let mut dir = V2 { x: 0, y: -1 };
-        let horizontal_edge = String::from_utf8(
-            std::iter::repeat(b'#').take(W + 2).collect::<Vec<u8>>()
-        )
-        .unwrap();
+        let mut game = SnakeGame::new().unwrap();
         let logic_handle = thread::spawn(move || loop {
             if quit_rec.lock().unwrap().try_recv().is_ok() {
                 break;
@@ -90,111 +90,153 @@ impl LogicHandler {
                 Ok(x) => x,
                 _ => Input::Undefined,
             };
-            match input {
-                Input::Up    => dir = V2 { x: 0, y:-1 },
-                Input::Down  => dir = V2 { x: 0, y: 1 },
-                Input::Left  => dir = V2 { x:-1, y: 0 },
-                Input::Right => dir = V2 { x: 1, y: 0 },
-                _            => { },
+            game.queue_input(input);
+            let draw = |x: String| {
+                let stdout = std::io::stdout();
+                let mut stdout_handle = stdout.lock();
+                let _ = stdout_handle.write(x.as_bytes());
+                let _ = stdout_handle.flush();
             };
-
-            let mut last_head = snake[0];
-            snake[0] = {
-                let keep_in_bounds = |p: &mut V2| {
-                    if p.x < 0              { p.x += W as i32; }
-                    else if W as i32 <= p.x { p.x -= W as i32; }
-                    if p.y < 0              { p.y += H as i32; }
-                    else if H as i32 <= p.y { p.y -= H as i32; }
-                };
-
-                let mut new_p = snake[0].add(&dir);
-                keep_in_bounds(&mut new_p);
-
-                if new_p == snake[1] {
-                    // Reverse the snake.
-                    snake = snake.into_iter().rev().collect();
-                    // Set direction to the "opposite" of previous tail.
-                    match snake[0].sub(&snake[1]) {
-                        d if d.x.abs() <= 1 && d.y.abs() <= 1 => dir = d,
-                        // Do nothing to handle the case where two successive
-                        // segments are at opposite edges.
-                        _ => { },
-                    };
-
-                    last_head = snake[0];
-                    new_p = snake[0].add(&dir);
-                }
-
-                keep_in_bounds(&mut new_p);
-
-                new_p
+            match game.next() {
+                Ok(x) => draw(x),
+                Err(e) => {
+                    draw(e);
+                    quit_sender.lock().unwrap().send(()).unwrap();
+                    break;
+                },
             };
-
-            for part in snake.iter_mut().skip(1) {
-                std::mem::swap(part, &mut last_head);
-            }
-
-            if snake[0].x == apple.x && snake[0].y == apple.y {
-                snake.push(snake[snake.len()-1]);
-                apple.x = (rand::random::<f32>() * W as f32) as i32;
-                apple.y = (rand::random::<f32>() * H as f32) as i32;
-            }
-
-            for part in board.iter_mut() {
-                *part = '.';
-            }
-            board[(snake[0].y * W as i32 + snake[0].x) as usize] = 'H';
-            snake.iter()
-                .skip(1)
-                .for_each(|p| board[(p.y * W as i32 + p.x) as usize] = 'S');
-            board[(apple.y * W as i32 + apple.x) as usize] = 'A';
-
-            let render = |board: &[char]| {
-                let mut view =
-                    String::with_capacity(board.len() + W * 2 + H * 3);
-                for line in board.chunks(W) {
-                    view.push('#');
-                    line.iter().for_each(|&c| view.push(c));
-                    view.push('#');
-                    view.push('\n');
-                }
-
-                {
-                    let stdout = std::io::stdout();
-                    let mut stdout_handle = stdout.lock();
-                    let _ = stdout_handle.write(
-                        format!(
-                            "{}\n{}{}\x1b[{}D\x1b[{}A",
-                            // Save upper left corner for showing the input
-                            // (...and thus wrapping the top edge nicely).
-                            &horizontal_edge[1..],
-                            view,
-                            horizontal_edge,
-                            W + 2, H + 1,
-                        )
-                        .as_bytes()
-                    );
-                    let _ = stdout_handle.flush();
-                }
-            };
-            render(&board);
-
-            let snake_ate_self = snake[1..].iter()
-                .any(|p| p.x == snake[0].x && p.y == snake[0].y);
-            if snake_ate_self {
-                board[(snake[0].y * W as i32 + snake[0].x) as usize] = 'X';
-                render(&board);
-                println!("\x1b[{}E\nGAME OVER. ([RETURN] to quit)", H + 1);
-                quit_sender.lock().unwrap().send(()).unwrap();
-                //println!("Snake: {:?}", snake);
-                //println!("Dir: {:?}", dir);
-                break;
-            }
-
-            thread::sleep(time::Duration::from_millis(200));
+            thread::sleep(time::Duration::from_millis(100)); 
         });
 
         Self(logic_handle)
+    }
+}
+
+type Board = [char; W * H];
+
+struct SnakeGame {
+    board: Board,
+    snake: Vec<V2>,
+    apple: V2,
+    dir: V2,
+    horizontal_edge: String,
+    input_queue: VecDeque<Input>,
+}
+
+impl SnakeGame {
+    fn new() -> Result<Self, String> { 
+        let board = ['.'; W * H];
+        let snake = vec![V2 { x: 5, y: 5}, V2 { x: 6, y: 5}];
+        let apple = V2 { x: 9, y: 3 };
+        let dir = V2 { x: 0, y: -1 };
+        let horizontal_edge = String::from_utf8(
+            std::iter::repeat(b'#').take(W + 2).collect::<Vec<u8>>()
+        )
+        .unwrap();
+        let input_queue = VecDeque::new();
+
+        Ok(
+            Self {
+                board, snake, apple, dir, horizontal_edge, input_queue,
+            }
+        )
+    }
+
+    fn queue_input(&mut self, input: Input) {
+        self.input_queue.push_back(input);
+    }
+
+    fn next(&mut self) -> Result<String, String> {
+        let input = self.input_queue
+            .pop_front()
+            .unwrap_or(Input::Undefined);
+        match input {
+            Input::Up    => self.dir = V2 { x: 0, y:-1 },
+            Input::Down  => self.dir = V2 { x: 0, y: 1 },
+            Input::Left  => self.dir = V2 { x:-1, y: 0 },
+            Input::Right => self.dir = V2 { x: 1, y: 0 },
+            _            => { },
+        };
+
+        let mut last_head = self.snake[0];
+        self.snake[0] = {
+            let keep_in_bounds = |p: &mut V2| {
+                if p.x < 0              { p.x += W as i32; }
+                else if W as i32 <= p.x { p.x -= W as i32; }
+                if p.y < 0              { p.y += H as i32; }
+                else if H as i32 <= p.y { p.y -= H as i32; }
+            };
+
+            let mut new_p = self.snake[0].add(&self.dir);
+            keep_in_bounds(&mut new_p);
+
+            if new_p == self.snake[1] {
+                // Reverse the snake.
+                self.snake = self.snake.clone().into_iter().rev().collect();
+                // Set direction to the "opposite" of previous tail.
+                match self.snake[0].sub(&self.snake[1]) {
+                    d if d.x.abs() <= 1 && d.y.abs() <= 1 => self.dir = d,
+                    // Do nothing to handle the case where two successive
+                    // segments are at opposite edges.
+                    _ => { },
+                };
+
+                last_head = self.snake[0];
+                new_p = self.snake[0].add(&self.dir);
+            }
+
+            keep_in_bounds(&mut new_p);
+
+            new_p
+        };
+
+        for part in self.snake.iter_mut().skip(1) {
+            std::mem::swap(part, &mut last_head);
+        }
+
+        if self.snake[0].x == self.apple.x && self.snake[0].y == self.apple.y {
+            self.snake.push(self.snake[self.snake.len()-1]);
+            self.apple.x = (rand::random::<f32>() * W as f32) as i32;
+            self.apple.y = (rand::random::<f32>() * H as f32) as i32;
+        }
+
+        for part in self.board.iter_mut() {
+            *part = '.';
+        }
+        self.board[(self.snake[0].y * W as i32 + self.snake[0].x) as usize] = 'H';
+        for p in self.snake.iter().skip(1) {
+            self.board[(p.y * W as i32 + p.x) as usize] = 'S';
+        }
+        self.board[(self.apple.y * W as i32 + self.apple.x) as usize] = 'A';
+
+        let render = |board: &[char], horizontal_edge: &str| {
+            let mut view =
+                String::with_capacity(board.len() + W * 2 + H * 3);
+            for line in board.chunks(W) {
+                view.push('#');
+                line.iter().for_each(|&c| view.push(c));
+                view.push('#');
+                view.push('\n');
+            }
+
+            format!(
+                "{}\n{}{}\x1b[{}D\x1b[{}A",
+                // Save upper left corner for showing the input
+                // (...and thus wrapping the top edge nicely).
+                &horizontal_edge[1..],
+                view,
+                &horizontal_edge,
+                W + 2, H + 1,
+            )
+        };
+        let snake_ate_self = self.snake[1..].iter()
+            .any(|p| p.x == self.snake[0].x && p.y == self.snake[0].y);
+        if snake_ate_self {
+            self.board[(self.snake[0].y * W as i32 + self.snake[0].x) as usize] = 'X';
+            return Err(format!("{}\nGame over", render(&self.board, &self.horizontal_edge)));
+        }
+
+        Ok(render(&self.board, &self.horizontal_edge))
     }
 }
 
@@ -210,6 +252,7 @@ impl V2 {
     }
 }
 
+#[repr(C)]
 enum Input {
     Undefined,
     Up,
