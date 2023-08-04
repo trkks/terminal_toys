@@ -1,13 +1,8 @@
 # terminal_toys
-Thingamajigs to make command-line programs more user- and developer-friendly.
+Command-line thingamajigs helpful or otherwise.
 
 ## Smargs
-- Parse program arguments into required types based on your definition.
-- Show generated help messages in fitting situations:
-  - An argument could not be parsed correctly
-  - Not enough or too many arguments received
-  - Duplicates of or undefined option keys used
-  - Help is requested with the `-h/--help` options
+Command line argument parser into types that implement `std::str::FromStr`.
 
 ### Example:
 ```rust
@@ -39,9 +34,7 @@ for i in 0..repeats {
 ```
 
 ## ProgressBar
-Programs that take a long time processing will benefit from displaying their real-time status also on the command-line.
-
-Example scenario of eight threads running simultaneously with each having their own progress bar:
+Example of eight threads with a progress bar each:
 ```ignore
 Thread #1  95% [===================.]
 Thread #2 100% [====================] Done!
@@ -53,8 +46,7 @@ Thread #7 100% [====================] Done!
 Thread #8  90% [==================..]
 ```
 ## spinner
-The `start_spinner` -function animates the basic spinner (`(|) > (/) > (-) >
-(\)`) while waiting on your function-call to finish:
+Animation of the basic spinner `(|) > (/) > (-) > (\)` while waiting for a function to finish:
 ```rust
 use terminal_toys::spinner;
 fn my_long_process() -> u32 { 42 }
@@ -62,18 +54,15 @@ let result = spinner::start_spinner(|| my_long_process());
 ```
 
 ## Color
-Print colors on the command-line by setting current color with constants:
+Color manipulation codes saved into constants:
 ```rust
 use terminal_toys::textcolor::{GREEN, RESET};
 println!("{}The color of envy{}", GREEN, RESET);
 ```
 
 ## snake
-Play snake on the command-line with:
-```ignore
-cargo run --bin snake
-```
-Use `WASD` to __stage__ an input to a direction and hit `Enter` to apply it.
+Snake on the command-line with horrible controls.
+Use `WASD` to __stage__ an input to a direction and `Enter` to apply it.
 
 ```ignore
 ######################
