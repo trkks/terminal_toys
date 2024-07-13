@@ -110,6 +110,8 @@ fn game_loop(
         draw(render(game.board()));
 
         if let Err(e) = game_status {
+            // Move to bottom in order to show the end result nicely.
+            println!("\x1b[{}E", H + 1);
             println!("{} - Press [RETURN]", e);
             quit_sender.lock().unwrap().send(()).unwrap();
             break;
