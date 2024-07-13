@@ -15,6 +15,12 @@ const W: usize = 20;
 const H: usize = 10;
 const WALL: char = '#';
 
+#[link(name="cread")]
+extern "C" {
+    fn setup();
+    fn read_char() -> i32;
+    fn teardown();
+}
 
 fn input_loop(
     input_sender: mpsc::Sender<Input>,
@@ -22,33 +28,34 @@ fn input_loop(
     quit_rec: Arc<Mutex<mpsc::Receiver<()>>>,
 ) -> impl FnOnce() -> () {
     let stdin = std::io::stdin();
-    move || loop {
-        if let Ok(()) = quit_rec.lock().unwrap().try_recv() {
-            break;
-        }
-        let mut s = String::new();
-        stdin.read_line(&mut s).unwrap();  // Blocks
-        // Undo the RETURN resulted from input by moving to previous line.
-        print!("\x1b[F");
-        let _ = std::io::stdout().flush();
-
-        let input = match &s.as_str().trim().to_lowercase()[..] {
-            "w" => Input::Up,
-            "s" => Input::Down,
-            "a" => Input::Left,
-            "d" => Input::Right,
-            _   => Input::Undefined,
-        };
-        if let Input::Undefined = input {
-            if s.contains('q') {
-                quit_sender.lock().unwrap().send(()).unwrap();
-                // Move back to the bottom.
-                println!("\x1b[{}E", H + 1);
+    move || {
+        unsafe { setup(); }
+        loop {
+            if let Ok(()) = quit_rec.lock().unwrap().try_recv() {
                 break;
             }
-        } else if input_sender.send(input).is_err() {
-            break;
+
+            let c = unsafe { read_char() as u8 };
+
+            let input = match c {
+                b'w' => Input::Up,
+                b's' => Input::Down,
+                b'a' => Input::Left,
+                b'd' => Input::Right,
+                _   => Input::Undefined,
+            };
+            if let Input::Undefined = input {
+                if c == b'q' {
+                    quit_sender.lock().unwrap().send(()).unwrap();
+                    // Move back to the bottom.
+                    println!("\x1b[{}E", H + 1);
+                    break;
+                }
+            } else if input_sender.send(input).is_err() {
+                break;
+            }
         }
+        unsafe { teardown(); }
     }
 }
 
