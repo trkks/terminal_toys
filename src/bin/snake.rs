@@ -27,7 +27,6 @@ fn input_loop(
     quit_sender: Arc<Mutex<mpsc::Sender<()>>>,
     quit_rec: Arc<Mutex<mpsc::Receiver<()>>>,
 ) -> impl FnOnce() -> () {
-    let stdin = std::io::stdin();
     move || {
         unsafe { setup(); }
         loop {
@@ -96,9 +95,7 @@ fn game_loop(
 
             format!(
                 "{}\n{}{}\x1b[{}D\x1b[{}A",
-                // Save upper left corner for showing the input
-                // (...and thus wrapping the top edge nicely).
-                &horizontal_edge[1..],
+                horizontal_edge,
                 view,
                 horizontal_edge,
                 W + 2, H + 1,
@@ -118,8 +115,7 @@ fn game_loop(
 
         if let Err(e) = game_status {
             // Move to bottom in order to show the end result nicely.
-            println!("\x1b[{}E", H + 1);
-            println!("{} - Press [RETURN]", e);
+            println!("\x1b[{}E\n{}", H + 1, e);
             quit_sender.lock().unwrap().send(()).unwrap();
             break;
         }
@@ -156,6 +152,6 @@ fn main() {
         quit_receiver,
     ));
 
-    let _ = input.join();
     let _ = game.join();
+    let _ = input.join();
 }
