@@ -61,8 +61,7 @@ println!("{}The color of envy{}", GREEN, RESET);
 ```
 
 ## snake
-Snake on the command-line with horrible controls.
-Use `WASD` to __stage__ an input to a direction and `Enter` to apply it.
+Snake on the command-line. Control with `WASD`.
 
 ```ignore
 ######################
