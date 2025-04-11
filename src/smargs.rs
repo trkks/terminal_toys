@@ -9,10 +9,11 @@ use std::str::FromStr;
 
 use std::marker::PhantomData;
 
-
 /// Return pattern for all required argument kinds.
 macro_rules! required_kinds {
-    () => { Kind::Required | Kind::List(1..) };
+    () => {
+        Kind::Required | Kind::List(1..)
+    };
 }
 
 /// Represents a string that is found in the command line arguments.
@@ -52,15 +53,15 @@ impl Value {
     /// the way.
     fn push(&mut self, value: String) {
         match self {
-            Self::None     => {
+            Self::None => {
                 *self = Self::Just(value);
-            },
-            Self::Just(x)  => {
+            }
+            Self::Just(x) => {
                 *self = Self::List(vec![x.to_owned(), value]);
-            },
+            }
             Self::List(xs) => {
                 xs.push(value);
-            },
+            }
         }
     }
 }
@@ -68,9 +69,11 @@ impl Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f, "{}", match self {
-                Self::None     => "".to_owned(),
-                Self::Just(x)  => x.clone(),
+            f,
+            "{}",
+            match self {
+                Self::None => "".to_owned(),
+                Self::Just(x) => x.clone(),
                 Self::List(xs) => xs.join(", "),
             },
         )
@@ -88,10 +91,18 @@ where
 {
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
         match &smarg.value {
-            Value::None     => Err(Error::Missing(smarg)),
-            Value::Just(x)  => Ok(List(vec![<T as FromStr>::from_str(x).map_err(|e| Error::Parsing { of: smarg, failed_with: Box::new(e) })?])),
+            Value::None => Err(Error::Missing(smarg)),
+            Value::Just(x) => Ok(List(vec![<T as FromStr>::from_str(x).map_err(|e| {
+                Error::Parsing {
+                    of: smarg,
+                    failed_with: Box::new(e),
+                }
+            })?])),
             Value::List(xs) => {
-                let mut results: Vec<Option<StdResult<T, _>>> = xs.iter().map(|x| Some(<T as FromStr>::from_str(x))).collect();
+                let mut results: Vec<Option<StdResult<T, _>>> = xs
+                    .iter()
+                    .map(|x| Some(<T as FromStr>::from_str(x)))
+                    .collect();
                 let mut found_error = None;
                 for (i, result) in results.iter().enumerate() {
                     if result.as_ref().unwrap().is_err() {
@@ -101,12 +112,15 @@ where
                 }
                 if let Some(i) = found_error {
                     let error = results[i].take().unwrap().unwrap_err();
-                    Err(Error::Parsing { of: smarg, failed_with: Box::new(error) })
+                    Err(Error::Parsing {
+                        of: smarg,
+                        failed_with: Box::new(error),
+                    })
                 } else {
                     let values = results.into_iter().map(|x| x.unwrap().unwrap()).collect();
                     Ok(List(values))
                 }
-            },
+            }
         }
     }
 }
@@ -118,8 +132,11 @@ where
 {
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
         match &smarg.value {
-            Value::None     => Err(Error::Missing(smarg)),
-            Value::Just(x)  => <T as FromStr>::from_str(x).map_err(|e| Error::Parsing { of: smarg.clone(), failed_with: Box::new(e) }),
+            Value::None => Err(Error::Missing(smarg)),
+            Value::Just(x) => <T as FromStr>::from_str(x).map_err(|e| Error::Parsing {
+                of: smarg.clone(),
+                failed_with: Box::new(e),
+            }),
             Value::List(_xs) => panic!("bad"),
         }
     }
@@ -131,7 +148,6 @@ where
 /// with the SmargKind::List(min).
 pub struct List<T: FromStr>(pub Vec<T>);
 
-        
 impl<T: FromStr> From<List<T>> for Vec<T> {
     fn from(value: List<T>) -> Self {
         value.0
@@ -165,11 +181,16 @@ where
     /// definitions in tuple form.
     pub fn with_definition<const N: usize>(
         desc: &'static str,
-        definition: [(&'static str, Vec<&'static str>, Kind); N]
+        definition: [(&'static str, Vec<&'static str>, Kind); N],
     ) -> Self {
         let mut smargs = Smargs::new(desc);
         for (s, ks, k) in definition {
-            smargs.push(Smarg { desc: s, keys: ks, kind: k, value: Value::None });
+            smargs.push(Smarg {
+                desc: s,
+                keys: ks,
+                kind: k,
+                value: Value::None,
+            });
         }
         smargs
     }
@@ -177,11 +198,13 @@ where
     /// Parse the argument strings into the type `Ts` according to the
     /// definition of `self` which may include using default values for some
     /// fields.
-    /// 
+    ///
     /// Note that the name of the program/command is assumed to be the first
     /// item in `args`.
-    pub fn parse(mut self, mut args: impl DoubleEndedIterator<Item = String>) -> StdResult<Ts, Box<Break>>
-    {
+    pub fn parse(
+        mut self,
+        mut args: impl DoubleEndedIterator<Item = String>,
+    ) -> StdResult<Ts, Box<Break>> {
         if let Some(name) = args.next() {
             self.name = name;
         }
@@ -192,25 +215,25 @@ where
         let mut values = self.explicit_values(args, &help)?;
 
         // Handle missing values based on kinds and defaults.
-        for (i, value) in values
-            .iter_mut()
-            .enumerate()
-            .filter(|(_, x)| x.is_none())
-        {
+        for (i, value) in values.iter_mut().enumerate().filter(|(_, x)| x.is_none()) {
             let fillin = match self.list[i].kind {
-                    Kind::Optional(default) => Value::Just(default.to_owned()),
-                    Kind::Flag | Kind::Help => Value::Just(false.to_string()),
-                    required_kinds!() => {
-                        return Err(help.short_break(Error::Missing(self.list[i].clone())));
-                    },
-                    Kind::List(_) => Value::List(vec![]),
-                    Kind::Maybe => Value::None,
+                Kind::Optional(default) => Value::Just(default.to_owned()),
+                Kind::Flag | Kind::Help => Value::Just(false.to_string()),
+                required_kinds!() => {
+                    return Err(help.short_break(Error::Missing(self.list[i].clone())));
+                }
+                Kind::List(_) => Value::List(vec![]),
+                Kind::Maybe => Value::None,
             };
             value.replace(fillin);
         }
 
         // Update self with the resolved values.
-        for (i, value) in values.into_iter().map(|x| x.expect("not all values handled")).enumerate() {
+        for (i, value) in values
+            .into_iter()
+            .map(|x| x.expect("not all values handled"))
+            .enumerate()
+        {
             self.list[i].value = value;
         }
 
@@ -232,7 +255,12 @@ where
     /// parsing will be interrupted and return an automatically generated help
     /// message.
     pub fn help_keys(mut self, keys: Vec<&'static str>) -> Self {
-        self.push(Smarg { desc: "Show this help message", keys, kind: Kind::Help, value: Value::None });
+        self.push(Smarg {
+            desc: "Show this help message",
+            keys,
+            kind: Kind::Help,
+            value: Value::None,
+        });
 
         self
     }
@@ -246,16 +274,43 @@ where
             self.list
                 .iter()
                 // Do _not_ include Help in usage list.
-                .filter_map(|x| (!matches!(x.kind, Kind::Help)).then_some(x.kind.to_string()))
-                .zip(iter::repeat(' '))
-                .fold(
-                    String::new(),
-                    |mut acc, (l, r)| { acc.push_str(&l); acc.push(r); acc }
-                )
+                .filter_map(|x| {
+                    let display = x
+                        .keys
+                        .clone()
+                        .into_iter()
+                        .filter(|x| x.len() > 1)
+                        .max()
+                        .unwrap_or(x.desc);
+                    match x.kind {
+                        Kind::Help => None,
+                        Kind::Required => Some(format!("<{}>", display)),
+                        Kind::Flag => Some(format!(
+                            "[-{}]",
+                            if display.len() > 1 {
+                                format!("-{}", display)
+                            } else {
+                                display.to_string()
+                            }
+                        )),
+                        Kind::List(_) | Kind::Optional(_) | Kind::Maybe => {
+                            Some(format!("[{}]", display))
+                        }
+                    }
+                })
+                .fold(String::new(), |mut acc, l| {
+                    acc.push_str(&format!("{} ", l));
+                    acc
+                })
         );
 
         let mut short = usage.clone();
-        if let Smarg { keys, kind: Kind::Help, .. } = &self.list[0] {
+        if let Smarg {
+            keys,
+            kind: Kind::Help,
+            ..
+        } = &self.list[0]
+        {
             short.push_str(&format!(
                 "\nTry '{} {}' for more information.",
                 self.name,
@@ -263,7 +318,7 @@ where
                 // keys.len() in self.push(Smarg)?
                 match keys.iter().max().unwrap() {
                     s if s.len() == 1 => format!("-{}", s),
-                    s => format!("--{}", s)
+                    s => format!("--{}", s),
                 },
             ));
         }
@@ -273,16 +328,20 @@ where
         long.push_str("\n\nArgument descriptions:\n");
         // Find the longest Smarg-string in order to nicely line up the
         // descriptions to start from the same column.
-        let (max_width, details) = self.list
+        let (max_width, details) = self
+            .list
             .iter()
+            .skip(1)
+            // Place the help arg last.
+            .chain(self.list.first().into_iter())
             .fold(
                 (0, Vec::with_capacity(self.list.len())),
                 |(max_len, mut acc), x| {
-                    let usage = x.to_string();
+                    let usage = x.to_string().replace(&format!(" - {}", x.desc), "");
                     let len = usage.len();
                     acc.push((usage, x.desc));
                     (if len > max_len { len } else { max_len }, acc)
-                }
+                },
             );
 
         let pad_len = max_width + 5;
@@ -304,7 +363,7 @@ where
     fn explicit_values(
         &self,
         args: impl DoubleEndedIterator<Item = String>,
-        help: &Help
+        help: &Help,
     ) -> StdResult<Vec<Option<Value>>, Box<Break>> {
         let mut state: ValueParserState = ValueParserState::new(args, self.list.len());
         state.rindex = self.list.iter().position(|x| x.kind.is_required());
@@ -318,7 +377,8 @@ where
             // when querying from the key set validated at definition time.
             let arg = {
                 let (prefix_len, stripped_key) = {
-                    let (fst, snd) = arg.split_at(arg.bytes().take(2).take_while(|b| *b == b'-').count());
+                    let (fst, snd) =
+                        arg.split_at(arg.bytes().take(2).take_while(|b| *b == b'-').count());
                     let n = fst.len();
                     // Check that things like negative numbers are not
                     // interpreted as keys.
@@ -334,9 +394,11 @@ where
                     value: stripped_key.to_owned(),
                     type_: match prefix_len {
                         0 => Key::Position,
-                        1 => Key::Short { group_size: stripped_key.len() },
+                        1 => Key::Short {
+                            group_size: stripped_key.len(),
+                        },
                         _ => Key::Long,
-                    }
+                    },
                 }
             };
 
@@ -345,24 +407,22 @@ where
                     // TODO: CHECK IMPLEMENTATION: The positioned options
                     // have lower precedence compared to the explicit
                     // key-value method.
-                    let idx = state.rindex
+                    let idx = state
+                        .rindex
                         .ok_or_else(|| help.short_break(Error::UndefinedArgument(arg.clone())))?;
-                    if let Some(first_val) = state.values[idx].replace(Value::Just(arg.clone().value)) {
-                        return Err(help.short_break(
-                            Error::Duplicate {
-                                first: (
-                                    state.history[idx].as_mut().unwrap().pop().unwrap(),
-                                    first_val
-                                ),
-                                extra: (
-                                    arg,
-                                    state.values[idx].take().unwrap(),
-                                )
-                            }
-                        ));
+                    if let Some(first_val) =
+                        state.values[idx].replace(Value::Just(arg.clone().value))
+                    {
+                        return Err(help.short_break(Error::Duplicate {
+                            first: (
+                                state.history[idx].as_mut().unwrap().pop().unwrap(),
+                                first_val,
+                            ),
+                            extra: (arg, state.values[idx].take().unwrap()),
+                        }));
                     }
                     state.next_unsatisfied_required_position(&self.list);
-                },
+                }
                 Key::Short { group_size: 2.. } => {
                     // Replace the args-queue's front with the "normalized"
                     // multi-character group (which consist of multiple flags +
@@ -374,12 +434,12 @@ where
                     // elem:  -a:-_:xs -> -a:-b:-_:xs -> -a:-b:-k:-_:xs -> ...
                     state.stack.extend(keys.rev());
                     // Let the main-loop handle these added "new" keys normally.
-                },
+                }
                 Key::Long | Key::Short { group_size: 1 } => {
                     // Save the handled arg and how it was got for future
                     // reference in case of errors.
                     state.resolve_keyed_value(self, arg, help)?;
-                },
+                }
                 Key::Short { .. } => {
                     panic!("should be impossible to have matched '-'");
                 }
@@ -391,7 +451,7 @@ where
 
     /// NOTE: Not to be called by user directly; instead use the `From`
     /// implementations or `smärgs` macro!
-    /// 
+    ///
     /// Parse into the type `T` the next value of arg defined in running order.
     pub fn parse_next<T>(&mut self) -> StdResult<T, Error>
     where
@@ -434,7 +494,10 @@ where
 
         // Get the correct index to insert (not push) into.
         let handle = if let Kind::Help = smarg.kind {
-            if let Some(Smarg { kind: Kind::Help, .. }) = self.list.get(0) {
+            if let Some(Smarg {
+                kind: Kind::Help, ..
+            }) = self.list.get(0)
+            {
                 panic!("the help argument can not be defined more than once");
             }
             // The zeroth index is reserved for Help so all the others will be
@@ -474,7 +537,8 @@ where
 
     fn validate_key_name(key: &str) -> StdResult<(), String> {
         const START_CHARACTERS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        const POST_START_CHARACTERS: &[u8] = b"-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        const POST_START_CHARACTERS: &[u8] =
+            b"-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         if key.is_empty() {
             return Err("a key must not be empty".to_owned());
         }
@@ -484,7 +548,7 @@ where
         if !key.is_ascii() {
             return Err(format!("a key must only contain ASCII characters: {}", key));
         }
-        
+
         let mut bytes = key.bytes();
         // This is OK as key is guaranteed to contain >0 bytes AND all
         // characters in key at this point are confirmed to be ASCII.
@@ -549,11 +613,13 @@ impl ValueParserState {
         arg: Arg,
         help: &Help,
     ) -> StdResult<(), Box<Break>> {
-        let key_matched_index = *smargs.map
+        let key_matched_index = *smargs
+            .map
             .get(&arg.value)
             .ok_or_else(|| help.short_break(Error::UndefinedKey(arg.clone())))?;
 
-        let smarg = smargs.list
+        let smarg = smargs
+            .list
             .get(key_matched_index)
             .expect("position not found");
 
@@ -563,21 +629,22 @@ impl ValueParserState {
                 // in the form of `--help`, interrupt the parsing
                 // here and return the more detailed help-message.
                 return Err(help.long_break(Error::Help));
-            },
+            }
             Kind::Flag => {
-                if let Some(first_val) = self.values[key_matched_index].replace(Value::Just(true.to_string())) {
-                    return Err(help.short_break(
-                        Error::Duplicate {
-                            first: (
-                                self.history[key_matched_index].as_mut().unwrap().pop().unwrap(),
-                                first_val,
-                            ),
-                            extra: (
-                                arg,
-                                self.values[key_matched_index].take().unwrap(),
-                            )
-                        }
-                    ));
+                if let Some(first_val) =
+                    self.values[key_matched_index].replace(Value::Just(true.to_string()))
+                {
+                    return Err(help.short_break(Error::Duplicate {
+                        first: (
+                            self.history[key_matched_index]
+                                .as_mut()
+                                .unwrap()
+                                .pop()
+                                .unwrap(),
+                            first_val,
+                        ),
+                        extra: (arg, self.values[key_matched_index].take().unwrap()),
+                    }));
                 }
                 // Update history; index matches with chosen value.
                 let history = vec![arg];
@@ -585,15 +652,14 @@ impl ValueParserState {
                     self.history[key_matched_index].replace(history).is_none(),
                     "should be impossible to overwrite flag's history"
                 );
-            },
+            }
             Kind::List(_min) => {
                 if let Some(list) = self.values[key_matched_index].as_mut() {
                     if let Some(value) = self.stack.pop() {
                         list.push(value);
                     } else {
-                        return Err(help.short_break(
-                            Error::Missing(smargs.list[key_matched_index].clone()),
-                        ));
+                        return Err(help
+                            .short_break(Error::Missing(smargs.list[key_matched_index].clone())));
                     }
                 }
                 // Update history; index matches with chosen value.
@@ -602,22 +668,23 @@ impl ValueParserState {
                 } else {
                     self.history[key_matched_index].replace(vec![]);
                 }
-            },
+            }
             _ => {
                 if let Some(value) = self.stack.pop() {
-                    if let Some(first_val) = self.values[key_matched_index].replace(Value::Just(value)) {
-                        return Err(help.short_break(
-                            Error::Duplicate {
-                                first: (
-                                    self.history[key_matched_index].as_mut().unwrap().pop().unwrap(),
-                                    first_val,
-                                ),
-                                extra: (
-                                    arg,
-                                    self.values[key_matched_index].take().unwrap(),
-                                ),
-                            }
-                        ));
+                    if let Some(first_val) =
+                        self.values[key_matched_index].replace(Value::Just(value))
+                    {
+                        return Err(help.short_break(Error::Duplicate {
+                            first: (
+                                self.history[key_matched_index]
+                                    .as_mut()
+                                    .unwrap()
+                                    .pop()
+                                    .unwrap(),
+                                first_val,
+                            ),
+                            extra: (arg, self.values[key_matched_index].take().unwrap()),
+                        }));
                     }
                     // Update the position because this required was received
                     // based on key-value.
@@ -631,12 +698,11 @@ impl ValueParserState {
                 } else {
                     return Err(help.short_break(Error::Missing(smarg.clone())));
                 }
-            },
+            }
         }
         Ok(())
     }
 }
-
 
 /// More elaborative explanation for an error.
 #[derive(Debug)]
@@ -650,15 +716,24 @@ pub enum ErrorKind {
 /// arguments. The `short` message is preferred during generic error conditions
 /// and `long` when explicitly requesting for help.
 #[derive(Debug)]
-struct Help { short: String, long: String }
+struct Help {
+    short: String,
+    long: String,
+}
 
 impl Help {
     fn short_break(&self, err: Error) -> Box<Break> {
-        Box::new(Break { err, help: self.short.clone() })
+        Box::new(Break {
+            err,
+            help: self.short.clone(),
+        })
     }
 
     fn long_break(&self, err: Error) -> Box<Break> {
-        Box::new(Break { err, help: self.long.clone() })
+        Box::new(Break {
+            err,
+            help: self.long.clone(),
+        })
     }
 }
 
@@ -667,9 +742,12 @@ impl Help {
 /// to describe the program by its arguments.
 /// TODO: `impl ops::Try for Break`?
 #[derive(Debug)]
-pub struct Break { pub err: Error, pub help: String }
+pub struct Break {
+    pub err: Error,
+    pub help: String,
+}
 
-impl error::Error for Break { }
+impl error::Error for Break {}
 
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
@@ -679,13 +757,19 @@ pub enum Error {
     /// variants.
     Dummy(Box<dyn error::Error>),
     /// Found an unexpected extra match for `Smarg`.
-    Duplicate { first: (Arg, Value), extra: (Arg, Value) },
+    Duplicate {
+        first: (Arg, Value),
+        extra: (Arg, Value),
+    },
     /// Instructions were explicitly request i.e., the help-key was found.
     Help,
     /// A matching value for `Smarg` was expected but is missing.
     Missing(Smarg),
     /// Parsing from `Value` as matched to `Smarg` failed.
-    Parsing { of: Smarg, failed_with: Box<dyn error::Error> },
+    Parsing {
+        of: Smarg,
+        failed_with: Box<dyn error::Error>,
+    },
     /// No match found for given argument.
     UndefinedArgument(Arg),
     /// No match found for given key.
@@ -709,15 +793,28 @@ impl fmt::Display for Error {
                     "already matched {}: {} but then found {}: {}",
                     first.0, first.1, extra.0, extra.1,
                 )
-            },
+            }
             Self::Help => "help".to_owned(),
-            Self::Missing(smarg) => format!("argument missing for {}", smarg),
+            Self::Missing(smarg) => format!("value missing for {}", smarg),
             Self::Parsing { of, failed_with } => {
                 format!(
-                    "failed to parse {}: {:?}",
-                    of, failed_with
+                    "failed to parse '{}{}' - {}",
+                    of.keys
+                        .iter()
+                        .max()
+                        .map(|x| format!(
+                            "-{} ",
+                            if x.len() > 1 {
+                                format!("-{}", x)
+                            } else {
+                                x.to_string()
+                            }
+                        ))
+                        .unwrap_or("".to_string()),
+                    of.value,
+                    failed_with
                 )
-            },
+            }
             Self::UndefinedArgument(arg) => format!("extra argument '{}'", arg),
             // TODO Suggest similar existing arguments in case of user typo.
             Self::UndefinedKey(key) => format!("option '{}' does not exist", key),
@@ -733,7 +830,7 @@ pub struct Smarg {
     pub desc: &'static str,
     pub keys: Vec<&'static str>,
     pub kind: Kind,
-    pub value: Value
+    pub value: Value,
 }
 
 impl Display for Smarg {
@@ -750,14 +847,14 @@ impl Display for Smarg {
         };
 
         let note = match &self.kind {
-            Kind::Required => "<required value>".to_owned(),
-            Kind::Optional(default) => format!("<value OR '{}'>", default),
-            Kind::Flag | Kind::Help => "Negated by default".to_owned(),
-            Kind::List(n) => format!("List of {} or more values", n),
-            Kind::Maybe => "<value OR ??>".to_owned(),
+            Kind::Required => "<REQUIRED>".to_owned(),
+            Kind::Optional(default) => format!("<VALUE default '{}'>", default),
+            Kind::Flag | Kind::Help => "".to_owned(),
+            Kind::List(n) => format!("[<VALUE>; {}]", n),
+            Kind::Maybe => "<VALUE>".to_owned(),
         };
 
-        write!(f, "{}{}", keystring, note)
+        write!(f, "{}{} - {}", keystring, note, self.desc)
     }
 }
 
@@ -787,20 +884,6 @@ impl Kind {
     /// Return whether this represents a required argument.
     fn is_required(&self) -> bool {
         matches!(self, required_kinds!())
-    }
-}
-
-impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            Self::Help        => "(HELP)".to_owned(),
-            Self::Required    => "REQUIRED".to_owned(),
-            Self::Optional(_) => "<OPTIONAL>".to_owned(),
-            Self::Flag        => "<FLAG>".to_owned(),
-            Self::List(0)     => "[OPTIONAL]".to_owned(),
-            Self::List(n)     => format!("[REQUIRED; {}]", n),
-            Self::Maybe       => "MAYBE?".to_owned(),
-        })
     }
 }
 
@@ -843,22 +926,22 @@ macro_rules! tryfrom_impl {
             fn try_from(mut smargs: Smargs<Self>) -> StdResult<Self, Error> {
                 Ok( ($( smargs.parse_next::<$t>()?, )*) )
             }
-        }       
+        }
     };
 }
 
 tryfrom_impl!(T1);
-tryfrom_impl!(T1,T2);
-tryfrom_impl!(T1,T2,T3);
-tryfrom_impl!(T1,T2,T3,T4);
-tryfrom_impl!(T1,T2,T3,T4,T5);
-tryfrom_impl!(T1,T2,T3,T4,T5,T6);
-tryfrom_impl!(T1,T2,T3,T4,T5,T6,T7);
-tryfrom_impl!(T1,T2,T3,T4,T5,T6,T7,T8);
+tryfrom_impl!(T1, T2);
+tryfrom_impl!(T1, T2, T3);
+tryfrom_impl!(T1, T2, T3, T4);
+tryfrom_impl!(T1, T2, T3, T4, T5);
+tryfrom_impl!(T1, T2, T3, T4, T5, T6);
+tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7);
+tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 #[cfg(test)]
 mod tests {
-    use super::{Break, Error, Smargs, Smarg, Value, Key, Arg, Kind, List, Result};
+    use super::{Arg, Break, Error, Key, Kind, List, Result, Smarg, Smargs, Value};
 
     // NOTE: Naming conventions:
     // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
@@ -874,9 +957,10 @@ mod tests {
             [
                 ("A", vec!["a"], Kind::Required),
                 ("B", vec!["b"], Kind::Required),
-            ])
-            .parse("x 0 1".split(' ').map(String::from))
-            .unwrap();
+            ],
+        )
+        .parse("x 0 1".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
         assert_eq!(b, 1);
@@ -889,9 +973,10 @@ mod tests {
             [
                 ("A", vec!["a"], Kind::Required),
                 ("B", vec!["b"], Kind::Required),
-            ])
-            .parse("x -a 0 1".split(' ').map(String::from))
-            .unwrap();
+            ],
+        )
+        .parse("x -a 0 1".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
         assert_eq!(b, 1);
@@ -904,9 +989,10 @@ mod tests {
             [
                 ("A", vec!["aa"], Kind::Required),
                 ("B", vec!["b"], Kind::Required),
-            ])
-            .parse("x --aa 0 1".split(' ').map(String::from))
-            .unwrap();
+            ],
+        )
+        .parse("x --aa 0 1".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
         assert_eq!(b, 1);
@@ -919,9 +1005,10 @@ mod tests {
             [
                 ("A", vec!["a"], Kind::Required),
                 ("B", vec!["b"], Kind::Required),
-            ])
-            .parse("x -b 1 0".split(' ').map(String::from))
-            .unwrap();
+            ],
+        )
+        .parse("x -b 1 0".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
         assert_eq!(b, 1);
@@ -929,14 +1016,11 @@ mod tests {
 
     #[test]
     fn parse_req_int_by_position_looks_like_key_res_req_from_position() {
-        let (a,) = Smargs::<(i32,)>::with_definition(
-            "Test program",
-            [
-                ("A" , vec!["a"], Kind::Required),
-            ])
-            .parse("x -1".split(' ').map(String::from))
-            .unwrap();
-        
+        let (a,) =
+            Smargs::<(i32,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .parse("x -1".split(' ').map(String::from))
+                .unwrap();
+
         assert_eq!(a, -1);
     }
 
@@ -945,12 +1029,13 @@ mod tests {
         let (s, a) = Smargs::<(String, usize)>::with_definition(
             "Test program",
             [
-                ("S" , vec!["s"], Kind::Required),
-                ("A" , vec!["a"], Kind::Optional("0")),
-            ])
-            .parse("x -s -a".split(' ').map(String::from))
-            .unwrap();
-        
+                ("S", vec!["s"], Kind::Required),
+                ("A", vec!["a"], Kind::Optional("0")),
+            ],
+        )
+        .parse("x -s -a".split(' ').map(String::from))
+        .unwrap();
+
         assert_eq!(s, "-a");
         assert_eq!(a, 0);
     }
@@ -959,14 +1044,11 @@ mod tests {
     // positional arguments or smth help the confusion?
     //#[test]
     fn parse_req_string_by_position_looks_like_key_res_req_from_position() {
-        let (s,) = Smargs::<(String,)>::with_definition(
-            "Test program",
-            [
-                ("S" , vec![], Kind::Required),
-            ])
-            .parse("x -s".split(' ').map(String::from))
-            .unwrap();
-        
+        let (s,) =
+            Smargs::<(String,)>::with_definition("Test program", [("S", vec![], Kind::Required)])
+                .parse("x -s".split(' ').map(String::from))
+                .unwrap();
+
         assert_eq!(s, "-s");
     }
 
@@ -974,11 +1056,10 @@ mod tests {
     fn parse_no_opt_res_opt_from_default() {
         let (a,) = Smargs::<(usize,)>::with_definition(
             "Test program",
-            [
-                ("A", vec!["a"], Kind::Optional("0")),
-            ])
-            .parse("x".split(' ').map(String::from))
-            .unwrap();
+            [("A", vec!["a"], Kind::Optional("0"))],
+        )
+        .parse("x".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
     }
@@ -987,37 +1068,30 @@ mod tests {
     fn parse_opt_by_key_res_opt_from_value() {
         let (a,) = Smargs::<(usize,)>::with_definition(
             "Test program",
-            [
-                ("A", vec!["a"], Kind::Optional("1")),
-            ])
-            .parse("x -a 0".split(' ').map(String::from))
-            .unwrap();
+            [("A", vec!["a"], Kind::Optional("1"))],
+        )
+        .parse("x -a 0".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
     }
 
     #[test]
     fn parse_no_flag_res_flag_from_false() {
-        let (a,) = Smargs::<(bool,)>::with_definition(
-            "Test program",
-            [
-                ("A", vec!["a"], Kind::Flag),
-            ])
-            .parse("x".split(' ').map(String::from))
-            .unwrap();
+        let (a,) =
+            Smargs::<(bool,)>::with_definition("Test program", [("A", vec!["a"], Kind::Flag)])
+                .parse("x".split(' ').map(String::from))
+                .unwrap();
 
         assert!(!a);
     }
 
     #[test]
     fn parse_flag_by_key_res_flag_from_true() {
-        let (a,) = Smargs::<(bool,)>::with_definition(
-            "Test program",
-            [
-                ("A", vec!["a"], Kind::Flag),
-            ])
-            .parse("x -a".split(' ').map(String::from))
-            .unwrap();
+        let (a,) =
+            Smargs::<(bool,)>::with_definition("Test program", [("A", vec!["a"], Kind::Flag)])
+                .parse("x -a".split(' ').map(String::from))
+                .unwrap();
 
         assert!(a);
     }
@@ -1029,9 +1103,10 @@ mod tests {
             [
                 ("A", vec!["a"], Kind::Flag),
                 ("B", vec!["b"], Kind::Required),
-            ])
-            .parse("x -ab 1".split(' ').map(String::from))
-            .unwrap();
+            ],
+        )
+        .parse("x -ab 1".split(' ').map(String::from))
+        .unwrap();
 
         assert!(a);
         assert_eq!(b, 1);
@@ -1041,11 +1116,10 @@ mod tests {
     fn parse_list2_by_keys_res_list2_from_values() {
         let (a,) = Smargs::<(List<usize>,)>::with_definition(
             "Test program",
-            [
-                ("A", vec!["a"], Kind::List(2)),
-            ])
-            .parse("x -a 0 -a 1".split(' ').map(String::from))
-            .unwrap();
+            [("A", vec!["a"], Kind::List(2))],
+        )
+        .parse("x -a 0 -a 1".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a.0.first(), Some(&0));
         assert_eq!(a.0.get(1), Some(&1));
@@ -1056,11 +1130,10 @@ mod tests {
     fn parse_list2_fst_by_position_snd_by_key_res_fst_from_position_snd_from_key() {
         let (a,) = Smargs::<(List<usize>,)>::with_definition(
             "Test program",
-            [
-                ("A", vec!["a"], Kind::List(2)),
-            ])
-            .parse("x 0 -a 1".split(' ').map(String::from))
-            .unwrap();
+            [("A", vec!["a"], Kind::List(2))],
+        )
+        .parse("x 0 -a 1".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a.0.first(), Some(&0));
         assert_eq!(a.0.get(1), Some(&1));
@@ -1070,11 +1143,10 @@ mod tests {
     fn parse_maybe_by_key_res_maybe_from_value() {
         let (a,) = Smargs::<(Result<usize>,)>::with_definition(
             "Test program",
-            [
-                ("A", vec!["a"], Kind::Maybe),
-            ])
-            .parse("x -a 0".split(' ').map(String::from))
-            .unwrap();
+            [("A", vec!["a"], Kind::Maybe)],
+        )
+        .parse("x -a 0".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a.0.unwrap(), 0);
     }
@@ -1085,19 +1157,21 @@ mod tests {
     fn parse_req_by_position_no_maybe_res_req_from_position_maybe_errors_missing() {
         let (a, b) = Smargs::<(usize, Result<usize>)>::with_definition(
             "Test program",
-            [
-                ("A",    vec![], Kind::Required),
-                ("B", vec!["b"], Kind::Maybe),
-            ])
-            .parse("x 0".split(' ').map(String::from))
-            .unwrap();
+            [("A", vec![], Kind::Required), ("B", vec!["b"], Kind::Maybe)],
+        )
+        .parse("x 0".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
         let b_err = b.0.unwrap_err();
-        assert!(matches!(
-            b_err,
-            Error::Missing(Smarg { desc, ref keys, kind: Kind::Maybe, value: Value::None }) if desc == "B" && keys[0] == "b",
-        ), "{}", b_err);
+        assert!(
+            matches!(
+                b_err,
+                Error::Missing(Smarg { desc, ref keys, kind: Kind::Maybe, value: Value::None }) if desc == "B" && keys[0] == "b",
+            ),
+            "{}",
+            b_err
+        );
     }
 
     // This seems (too much?) like a use-case...
@@ -1109,9 +1183,10 @@ mod tests {
                 ("A", vec!["a"], Kind::Required),
                 ("B", vec!["b"], Kind::Optional("1")),
                 ("C", vec!["c"], Kind::Required),
-            ])
-            .parse("x 0 2".split(' ').map(String::from))
-            .unwrap();
+            ],
+        )
+        .parse("x 0 2".split(' ').map(String::from))
+        .unwrap();
 
         assert_eq!(a, 0);
         assert_eq!(b, 1);
@@ -1120,11 +1195,11 @@ mod tests {
 
     #[test]
     fn parse_help_by_key_res_errors_generated_help() {
-        let err = Smargs::<()>::with_definition("Test program", [ ])
+        let err = Smargs::<()>::with_definition("Test program", [])
             .help_default()
             .parse("x --help".split(' ').map(String::from))
             .unwrap_err();
-        
+
         assert!(matches!(
             *err,
             Break { err: Error::Help, help }
@@ -1134,14 +1209,11 @@ mod tests {
 
     #[test]
     fn parse_no_1st_req_help_by_key_res_errors_generated_help() {
-        let err = Smargs::<(usize,)>::with_definition(
-            "Test program",
-            [
-                ("A", vec!["a"], Kind::Required),
-            ])
-            .help_default()
-            .parse("x --help".split(' ').map(String::from))
-            .unwrap_err();
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .help_default()
+                .parse("x --help".split(' ').map(String::from))
+                .unwrap_err();
 
         assert!(matches!(
             *err,
@@ -1152,15 +1224,12 @@ mod tests {
 
     #[test]
     fn parse_req_by_key_fst_help_by_key_res_errors_generated_help() {
-        let err = Smargs::<(usize,)>::with_definition(
-            "Test program",
-            [
-                ("A", vec!["a"], Kind::Required),
-            ])
-            .help_default()
-            .parse("x -a 0 --help".split(' ').map(String::from))
-            .unwrap_err();
-        
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .help_default()
+                .parse("x -a 0 --help".split(' ').map(String::from))
+                .unwrap_err();
+
         assert!(matches!(
             *err,
             Break { err: Error::Help, help }
@@ -1172,14 +1241,11 @@ mod tests {
 
     #[test]
     fn parse_no_req_res_errors_req_arg_missing_value() {
-        let err = Smargs::<(usize,)>::with_definition(
-            "Test program",
-            [
-                ("A", vec!["a"], Kind::Required),
-            ])
-            .parse("x".split(' ').map(String::from))
-            .unwrap_err();
-        
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .parse("x".split(' ').map(String::from))
+                .unwrap_err();
+
         assert!(matches!(
             *err,
             Break { err: Error::Missing(Smarg { desc, keys, kind: Kind::Required, value: Value::None }), .. } if desc == "A" && keys[0] == "a",
@@ -1193,9 +1259,10 @@ mod tests {
             [
                 ("A", vec!["a"], Kind::Required),
                 ("B", vec!["b"], Kind::Optional("1")),
-            ])
-            .parse("x 0 2".split(' ').map(String::from))
-            .unwrap_err();
+            ],
+        )
+        .parse("x 0 2".split(' ').map(String::from))
+        .unwrap_err();
 
         assert!(matches!(
             *err,
@@ -1206,66 +1273,67 @@ mod tests {
 
     #[test]
     fn parse_multiple_reqs_by_pos_res_errors_undefined_argument() {
-        let err = Smargs::<(usize, )>::with_definition(
-            "Test program",
-            [
-                ("A", vec![], Kind::Required),
-            ])
-            .parse(
-                "x 0 1".split(' ').map(String::from)
-            )
-            .unwrap_err();
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec![], Kind::Required)])
+                .parse("x 0 1".split(' ').map(String::from))
+                .unwrap_err();
 
-        assert!(matches!(
-            *err,
-            Break { err: Error::UndefinedArgument(Arg { value: ref s, type_: Key::Position }), .. }
-                if s == "1",
-        ), "{}", err);
+        assert!(
+            matches!(
+                *err,
+                Break { err: Error::UndefinedArgument(Arg { value: ref s, type_: Key::Position }), .. }
+                    if s == "1",
+            ),
+            "{}",
+            err
+        );
     }
 
     #[test]
     fn parse_multiple_reqs_by_key_res_errors_duplicate_value() {
-        let err = Smargs::<(usize, )>::with_definition(
-            "Test program",
-            [
-                ("A", vec!["a"], Kind::Required),
-            ])
-            .parse(
-                "x -a 0 -a 1".split(' ').map(String::from)
-            )
-            .unwrap_err();
-        
-        assert!(matches!(
-            *err,
-            Break {
-                err: Error::Duplicate {
-                    first: (
-                        Arg { value: ref fst_k, type_: Key::Short { group_size: 1 } },
-                        Value::Just(ref fst_v)
-                    ),
-                    extra: (
-                        Arg { value: ref ext_k, type_: Key::Short { group_size: 1 } },
-                        Value::Just(ref ext_v)
-                    ),
-                },
-                ..
-            } if fst_k == "a" && fst_v == "0" && ext_k == "a" && ext_v == "1",
-        ), "{}", err);
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .parse("x -a 0 -a 1".split(' ').map(String::from))
+                .unwrap_err();
+
+        assert!(
+            matches!(
+                *err,
+                Break {
+                    err: Error::Duplicate {
+                        first: (
+                            Arg { value: ref fst_k, type_: Key::Short { group_size: 1 } },
+                            Value::Just(ref fst_v)
+                        ),
+                        extra: (
+                            Arg { value: ref ext_k, type_: Key::Short { group_size: 1 } },
+                            Value::Just(ref ext_v)
+                        ),
+                    },
+                    ..
+                } if fst_k == "a" && fst_v == "0" && ext_k == "a" && ext_v == "1",
+            ),
+            "{}",
+            err
+        );
     }
 
     #[test]
     fn parse_req_by_key_no_value_res_errors_req_arg_missing_value() {
-        let err = Smargs::<(usize,)>::with_definition(
-            "Test program",
-            [
-                ("A", vec!["a"], Kind::Required),
-            ])
-            .parse("x -a".split(' ').map(String::from))
-            .unwrap_err();
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .parse("x -a".split(' ').map(String::from))
+                .unwrap_err();
 
         assert!(matches!(
             *err,
-            Break { err: Error::Missing(Smarg { kind: Kind::Required, .. }), .. },
+            Break {
+                err: Error::Missing(Smarg {
+                    kind: Kind::Required,
+                    ..
+                }),
+                ..
+            },
         ));
     }
 
@@ -1273,28 +1341,30 @@ mod tests {
     fn parse_opt_by_key_no_value_res_errors_opt_arg_missing_value() {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
-            [
-                ("A", vec!["a"], Kind::Optional("0")),
-            ])
-            .parse("x -a".split(' ').map(String::from))
-            .unwrap_err();
+            [("A", vec!["a"], Kind::Optional("0"))],
+        )
+        .parse("x -a".split(' ').map(String::from))
+        .unwrap_err();
 
         assert!(matches!(
             *err,
-            Break { err: Error::Missing(Smarg { kind: Kind::Optional(_), .. }), .. },
+            Break {
+                err: Error::Missing(Smarg {
+                    kind: Kind::Optional(_),
+                    ..
+                }),
+                ..
+            },
         ));
     }
 
     #[test]
     fn parse_req_by_position_undefined_key_no_value_res_errors_undefined_key() {
-        let err = Smargs::<(usize,)>::with_definition(
-            "Test program",
-            [
-                ("A" , vec!["a"], Kind::Required),
-            ])
-            .parse("x 0 -b".split(' ').map(String::from))
-            .unwrap_err();
-        
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .parse("x 0 -b".split(' ').map(String::from))
+                .unwrap_err();
+
         assert!(matches!(
             *err,
             Break { err: Error::UndefinedKey(Arg { value: s, type_: Key::Short { group_size: 1 } }), .. } if s == "b",
@@ -1303,19 +1373,20 @@ mod tests {
 
     #[test]
     fn parse_req_by_position_bad_value_res_errors_parsing_failed() {
-        let err = Smargs::<(usize,)>::with_definition(
-            "Test program",
-            [
-                ("A" , vec!["a"], Kind::Required),
-            ])
-            .parse("x -1".split(' ').map(String::from))
-            .unwrap_err();
-        
-        assert!(matches!(
-            *err,
-            Break { err: Error::Parsing { of: Smarg { value: Value::Just(ref s), .. }, failed_with: ref boxed_err }, .. }
-                if s == "-1" && boxed_err.is::<std::num::ParseIntError>(),
-        ), "{}", err);
+        let err =
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+                .parse("x -1".split(' ').map(String::from))
+                .unwrap_err();
+
+        assert!(
+            matches!(
+                *err,
+                Break { err: Error::Parsing { of: Smarg { value: Value::Just(ref s), .. }, failed_with: ref boxed_err }, .. }
+                    if s == "-1" && boxed_err.is::<std::num::ParseIntError>(),
+            ),
+            "{}",
+            err
+        );
     }
 
     #[test]
@@ -1323,10 +1394,7 @@ mod tests {
     fn from_init_tuple_flags_have_same_key_res_panics() {
         let _ = Smargs::<(bool, bool)>::with_definition(
             "Test program",
-            [
-                ("A",  vec!["a"], Kind::Flag),
-                ("Aa", vec!["a"], Kind::Flag),
-            ]
+            [("A", vec!["a"], Kind::Flag), ("Aa", vec!["a"], Kind::Flag)],
         );
     }
 }
