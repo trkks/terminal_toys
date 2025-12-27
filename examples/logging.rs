@@ -1,4 +1,7 @@
-use terminal_toys::{log, color_log, textcolor::{BRIGHT_RED, GREEN, RESET, BLACK, RED}};
+use terminal_toys::{
+    color_log, log,
+    textcolor::{BLACK, BRIGHT_RED, GREEN, RED, RESET},
+};
 
 const TTOYSLOG_COLOR: &str = BRIGHT_RED;
 
@@ -12,16 +15,22 @@ fn main() {
 
     // Highlight errors and successes.
     println!("{}{} - Bad request: {}foo", RED, 400, RESET,);
-    match Some(42) { Some(n) => println!("{}OK {}", GREEN, n), _ => { } }
+    match Some(42) {
+        Some(n) => println!("{}OK {}", GREEN, n),
+        _ => {}
+    }
 
     // Print a 8x7 heart ❤️.
-    println!("  {}████{}    {}████{}",       BLACK, RESET, BLACK, RESET);
-    println!("{}██{}████{}████{}████{}██{}", BLACK,   RED, BLACK,   RED, BLACK, RESET);
-    println!("{}██{}████████████{}██{}",     BLACK,   RED, BLACK, RESET);
-    println!("{}██{}████████████{}██{}",     BLACK,   RED, BLACK, RESET);
-    println!("  {}██{}████████{}██{}",       BLACK,   RED, BLACK, RESET);
-    println!("    {}██{}████{}██{}",         BLACK,   RED, BLACK, RESET);
-    println!("      {}████{}",               BLACK, RESET);
+    println!("  {}████{}    {}████{}", BLACK, RESET, BLACK, RESET);
+    println!(
+        "{}██{}████{}████{}████{}██{}",
+        BLACK, RED, BLACK, RED, BLACK, RESET
+    );
+    println!("{}██{}████████████{}██{}", BLACK, RED, BLACK, RESET);
+    println!("{}██{}████████████{}██{}", BLACK, RED, BLACK, RESET);
+    println!("  {}██{}████████{}██{}", BLACK, RED, BLACK, RESET);
+    println!("    {}██{}████{}██{}", BLACK, RED, BLACK, RESET);
+    println!("      {}████{}", BLACK, RESET);
 }
 
 #[cfg(test)]
@@ -31,8 +40,10 @@ mod test {
     #[test]
     fn log() {
         assert_eq!(
-            env!("TTOYSLOG"), module_path!(),
-            "please set environment variable `TTOYSLOG` to {}", module_path!()
+            env!("TTOYSLOG"),
+            module_path!(),
+            "please set environment variable `TTOYSLOG` to {}",
+            module_path!()
         );
         log!("Foo");
     }
@@ -40,8 +51,10 @@ mod test {
     #[test]
     fn color_log() {
         assert_eq!(
-            env!("TTOYSLOG"), module_path!(),
-            "please set environment variable `TTOYSLOG` to {}", module_path!()
+            env!("TTOYSLOG"),
+            module_path!(),
+            "please set environment variable `TTOYSLOG` to {}",
+            module_path!()
         );
         color_log!("Foo");
     }

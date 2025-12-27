@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-
 type Board = Vec<GameObject>;
 
 pub struct SnakeGame {
@@ -13,20 +12,26 @@ pub struct SnakeGame {
 }
 
 impl SnakeGame {
-    pub fn new(width: usize, height: usize) -> Result<Self, String> { 
+    pub fn new(width: usize, height: usize) -> Result<Self, String> {
         let board = vec![GameObject::Floor; width * height];
-        let board_size = V2 { x: width as i32, y: height as i32 };
-        let snake = vec![V2 { x: 5, y: 5}, V2 { x: 6, y: 5}];
+        let board_size = V2 {
+            x: width as i32,
+            y: height as i32,
+        };
+        let snake = vec![V2 { x: 5, y: 5 }, V2 { x: 6, y: 5 }];
         let apple = V2 { x: 9, y: 3 };
         let dir = V2 { x: 0, y: -1 };
 
         let input_queue = VecDeque::new();
 
-        Ok(
-            Self {
-                board, board_size, snake, apple, dir, input_queue,
-            }
-        )
+        Ok(Self {
+            board,
+            board_size,
+            snake,
+            apple,
+            dir,
+            input_queue,
+        })
     }
 
     pub fn queue_input(&mut self, input: Input) {
@@ -34,25 +39,29 @@ impl SnakeGame {
     }
 
     pub fn next_frame(&mut self) -> Result<(), &'static str> {
-        let input = self.input_queue
-            .pop_front()
-            .unwrap_or(Input::Undefined);
+        let input = self.input_queue.pop_front().unwrap_or(Input::Undefined);
         match input {
-            Input::Up    => self.dir = V2 { x: 0, y:-1 },
-            Input::Down  => self.dir = V2 { x: 0, y: 1 },
-            Input::Left  => self.dir = V2 { x:-1, y: 0 },
+            Input::Up => self.dir = V2 { x: 0, y: -1 },
+            Input::Down => self.dir = V2 { x: 0, y: 1 },
+            Input::Left => self.dir = V2 { x: -1, y: 0 },
             Input::Right => self.dir = V2 { x: 1, y: 0 },
-            _            => { },
+            _ => {}
         };
 
         let mut last_head = self.snake[0];
         self.snake[0] = {
             let (width, height) = (self.board_size.x as i32, self.board_size.y as i32);
             let keep_in_bounds = |p: &mut V2| {
-                if p.x < 0            { p.x += width;  }
-                else if width <= p.x  { p.x -= width;  }
-                if p.y < 0            { p.y += height; }
-                else if height <= p.y { p.y -= height; }
+                if p.x < 0 {
+                    p.x += width;
+                } else if width <= p.x {
+                    p.x -= width;
+                }
+                if p.y < 0 {
+                    p.y += height;
+                } else if height <= p.y {
+                    p.y -= height;
+                }
             };
 
             let mut new_p = self.snake[0].add(&self.dir);
@@ -66,7 +75,7 @@ impl SnakeGame {
                     d if d.x.abs() <= 1 && d.y.abs() <= 1 => self.dir = d,
                     // Do nothing to handle the case where two successive
                     // segments are at opposite edges.
-                    _ => { },
+                    _ => {}
                 };
 
                 last_head = self.snake[0];
@@ -83,7 +92,7 @@ impl SnakeGame {
         }
 
         if self.snake[0].x == self.apple.x && self.snake[0].y == self.apple.y {
-            self.snake.push(self.snake[self.snake.len()-1]);
+            self.snake.push(self.snake[self.snake.len() - 1]);
             self.apple.x = (rand::random::<f32>() * self.board_size.x as f32) as i32;
             self.apple.y = (rand::random::<f32>() * self.board_size.y as f32) as i32;
         }
@@ -91,15 +100,19 @@ impl SnakeGame {
         for part in self.board.iter_mut() {
             *part = GameObject::Floor;
         }
-        self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = GameObject::Head;
+        self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] =
+            GameObject::Head;
         for p in self.snake.iter().skip(1) {
             self.board[(p.y * self.board_size.x as i32 + p.x) as usize] = GameObject::Body;
         }
-        self.board[(self.apple.y * self.board_size.x as i32 + self.apple.x) as usize] = GameObject::Apple;
-        let snake_ate_self = self.snake[1..].iter()
+        self.board[(self.apple.y * self.board_size.x as i32 + self.apple.x) as usize] =
+            GameObject::Apple;
+        let snake_ate_self = self.snake[1..]
+            .iter()
             .any(|p| p.x == self.snake[0].x && p.y == self.snake[0].y);
         if snake_ate_self {
-            self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] = GameObject::Overlap;
+            self.board[(self.snake[0].y * self.board_size.x as i32 + self.snake[0].x) as usize] =
+                GameObject::Overlap;
             return Err("Game over");
         }
 
@@ -112,14 +125,23 @@ impl SnakeGame {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-struct V2 { x: i32, y: i32 }
+struct V2 {
+    x: i32,
+    y: i32,
+}
 impl V2 {
     fn add(&self, other: &V2) -> Self {
-        V2 { x: self.x + other.x, y: self.y + other.y }
+        V2 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
     }
 
     fn sub(&self, other: &V2) -> Self {
-        V2 { x: self.x - other.x, y: self.y - other.y }
+        V2 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
     }
 }
 

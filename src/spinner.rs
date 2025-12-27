@@ -1,12 +1,13 @@
 use std::io::{self, Write};
 use std::sync::mpsc;
-use std::time::Duration;
 use std::thread;
-
+use std::time::Duration;
 
 pub trait Animation {
     type Output;
-    fn start<B: io::Write>(buffer: B) -> io::Result<(Self::Output, Self)> where Self: Sized;
+    fn start<B: io::Write>(buffer: B) -> io::Result<(Self::Output, Self)>
+    where
+        Self: Sized;
     fn update<B: io::Write>(&mut self, buffer: B) -> io::Result<Self::Output>;
     fn finish<B: io::Write>(&mut self, buffer: B) -> io::Result<usize>;
 }
@@ -33,8 +34,8 @@ impl Animation for Spinner {
         thread::sleep(Duration::from_millis(100));
 
         self.frames += 1;
-        const SEQUENCES: [&[u8; 7]; 4]  =
-             [b"\x1b[3D(|)",b"\x1b[3D(/)",b"\x1b[3D(-)",b"\x1b[3D(\\)"];
+        const SEQUENCES: [&[u8; 7]; 4] =
+            [b"\x1b[3D(|)", b"\x1b[3D(/)", b"\x1b[3D(-)", b"\x1b[3D(\\)"];
 
         let _ = buffer.write(SEQUENCES[self.frames % 4]).unwrap();
         buffer.flush().unwrap();

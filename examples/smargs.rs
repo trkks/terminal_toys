@@ -1,6 +1,5 @@
+use std::{fmt::Display, str::FromStr};
 use terminal_toys::smargs;
-use std::{str::FromStr, fmt::Display};
-
 
 /// A custom type to parse from an argument.
 #[derive(Debug)]
@@ -16,7 +15,7 @@ impl Display for StringIsEmptyError {
 }
 /// The `Err` variant in `SmargsResult` requires implementing
 /// `std::error::Error` for using custom types.
-impl std::error::Error for StringIsEmptyError { }
+impl std::error::Error for StringIsEmptyError {}
 
 /// Bringing the two, custom type and parsing error together.
 impl FromStr for NonEmptyString {
@@ -39,24 +38,33 @@ impl Display for TextErrorMessage {
     }
 }
 
-impl std::error::Error for TextErrorMessage { }
-
+impl std::error::Error for TextErrorMessage {}
 
 /// Custom output type.
 type RegistrationInfo = (String, usize, smargs::Result<NonEmptyString>, String, bool);
 
-fn parse(args: impl DoubleEndedIterator<Item=String>) -> Result<RegistrationInfo, Box<smargs::Break>> {
+fn parse(
+    args: impl DoubleEndedIterator<Item = String>,
+) -> Result<RegistrationInfo, Box<smargs::Break>> {
     smargs::arguments!(
         "Register for a service",
-        ("Your full name",                    [],                smargs::Argument::Required),
-        ("Your age",                          ["a", "age"],      smargs::Argument::Required),
+        ("Your full name", [], smargs::Argument::Required),
+        ("Your age", ["a", "age"], smargs::Argument::Required),
         (
             "Email address without domain e.g. if address is 'foo@bar.baz' provide the 'foo' part",
             ["e"],
             smargs::Argument::Maybe
         ),
-        ("Email address domain",              ["d"],             smargs::Argument::Optional("coolnewz.com")),
-        ("Opt-out from receiving newsletter", ["no-newsletter"], smargs::Argument::Flag),
+        (
+            "Email address domain",
+            ["d"],
+            smargs::Argument::Optional("coolnewz.com")
+        ),
+        (
+            "Opt-out from receiving newsletter",
+            ["no-newsletter"],
+            smargs::Argument::Flag
+        ),
     )
     .help_default()
     .parse(args)
@@ -65,37 +73,43 @@ fn parse(args: impl DoubleEndedIterator<Item=String>) -> Result<RegistrationInfo
 fn use_example_args() -> bool {
     eprint!("You did not pass enough arguments. Proceed with example ones [Y/n]?");
     let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf).expect("failed reading stdin");
+    std::io::stdin()
+        .read_line(&mut buf)
+        .expect("failed reading stdin");
     let s = buf.trim().to_lowercase();
     let n = s.len();
     s.is_empty() || n <= 3 && "yes"[..n] == s[..n]
 }
 
 /// Demonstrate how `smargs::Error` can be handled e.g., using the `?` operator.
-fn construct_email(name: String, age: usize, local_part: smargs::Result<NonEmptyString>, domain: String) -> Result<String, smargs::Error> {
+fn construct_email(
+    name: String,
+    age: usize,
+    local_part: smargs::Result<NonEmptyString>,
+    domain: String,
+) -> Result<String, smargs::Error> {
     let split = domain.rsplit_once('.');
     let (domain, tld) = match split {
         Some((l, r)) if !l.is_empty() && !r.is_empty() => Ok((l, r)),
         Some((l, _)) if !l.is_empty() => Ok((l, "com")),
-        _ => Err(smargs::Error::Dummy(Box::new(
-            TextErrorMessage(format!("malformed domain: '{}'", domain))
-        ))),
+        _ => Err(smargs::Error::Dummy(Box::new(TextErrorMessage(format!(
+            "malformed domain: '{}'",
+            domain
+        ))))),
     }?;
 
-    let local_part = local_part.0.or_else(|e|
-        if let smargs::Error::Missing(_) | smargs::Error::Parsing { .. }= e {
+    let local_part = local_part.0.or_else(|e| {
+        if let smargs::Error::Missing(_) | smargs::Error::Parsing { .. } = e {
             eprintln!("Constructing default local part for email");
             Ok(NonEmptyString(format!("{}.{}", name, age)))
         } else {
             Err(e)
         }
-    )?;
+    })?;
 
-    Ok(
-        format!("{}@{}.{}", local_part.0, domain, tld)
+    Ok(format!("{}@{}.{}", local_part.0, domain, tld)
         .replace(' ', ".")
-        .to_lowercase()
-    )
+        .to_lowercase())
 }
 
 /// Similar registration example as seen in the documentation.
@@ -117,14 +131,22 @@ fn main() {
     let (name, age, local_part, domain, no_subscribe) = {
         // Catch this error in order to make demonstration of actual parsing easier.
         let x = match parse(std::env::args()) {
-            Err(e) if matches!(*e, smargs::Break { err: smargs::Error::Missing(_), .. }) && use_example_args() => {
+            Err(e)
+                if matches!(
+                    *e,
+                    smargs::Break {
+                        err: smargs::Error::Missing(_),
+                        ..
+                    }
+                ) && use_example_args() =>
+            {
                 // Use some hard-coded args for demonstration.
                 parse(example_args).expect("bad example args")
-            },
+            }
             Err(e) => {
                 eprintln!("{}", e);
                 std::process::exit(1)
-            },
+            }
             Ok(x) => x,
         };
 
@@ -152,7 +174,7 @@ fn main() {
         Err(e) => {
             eprintln!("{}", e);
             std::process::exit(1);
-        },
+        }
     };
 
     let subscriber_count = newsletter_subscribers.len();

@@ -1,11 +1,10 @@
-pub mod snake;
 pub mod progress_bar;
-pub mod spinner;
 pub mod smargs;
+pub mod snake;
+pub mod spinner;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -16,7 +15,7 @@ pub struct ReadmeDoctests;
 /// you're coloring with `textcolor::RESET`.
 ///
 /// Reference used: https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
-/// 
+///
 /// # Examples
 /// Highlight errors and successes.
 /// ```
@@ -36,23 +35,23 @@ pub struct ReadmeDoctests;
 /// println!("      {}████{}",               BLACK, RESET);
 /// ```
 pub mod textcolor {
-    pub const RESET: &str          = "\x1B[m";
-    pub const BLACK: &str          = "\x1B[30m";
-    pub const RED: &str            = "\x1B[31m";
-    pub const GREEN: &str          = "\x1B[32m";
-    pub const YELLOW: &str         = "\x1B[33m";
-    pub const BLUE: &str           = "\x1B[34m";
-    pub const MAGENTA: &str        = "\x1B[35m";
-    pub const CYAN: &str           = "\x1B[36m";
-    pub const WHITE: &str          = "\x1B[37m";
-    pub const GRAY: &str           = "\x1B[90m";
-    pub const BRIGHT_RED: &str     = "\x1B[91m";
-    pub const BRIGHT_GREEN: &str   = "\x1B[92m";
-    pub const BRIGHT_YELLOW: &str  = "\x1B[93m";
-    pub const BRIGHT_BLUE: &str    = "\x1B[94m";
+    pub const RESET: &str = "\x1B[m";
+    pub const BLACK: &str = "\x1B[30m";
+    pub const RED: &str = "\x1B[31m";
+    pub const GREEN: &str = "\x1B[32m";
+    pub const YELLOW: &str = "\x1B[33m";
+    pub const BLUE: &str = "\x1B[34m";
+    pub const MAGENTA: &str = "\x1B[35m";
+    pub const CYAN: &str = "\x1B[36m";
+    pub const WHITE: &str = "\x1B[37m";
+    pub const GRAY: &str = "\x1B[90m";
+    pub const BRIGHT_RED: &str = "\x1B[91m";
+    pub const BRIGHT_GREEN: &str = "\x1B[92m";
+    pub const BRIGHT_YELLOW: &str = "\x1B[93m";
+    pub const BRIGHT_BLUE: &str = "\x1B[94m";
     pub const BRIGHT_MAGENTA: &str = "\x1B[95m";
-    pub const BRIGHT_CYAN: &str    = "\x1B[96m";
-    pub const BRIGHT_WHITE: &str   = "\x1B[97m";
+    pub const BRIGHT_CYAN: &str = "\x1B[96m";
+    pub const BRIGHT_WHITE: &str = "\x1B[97m";
 }
 
 /// Log a message from module `x` IF an environment variable `TTOYSLOG` has
@@ -110,4 +109,3 @@ macro_rules! color_log {
         }
     };
 }
-

@@ -1,10 +1,9 @@
 use std::io::Write;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time;
 
-use terminal_toys::snake::{SnakeGame, Input, GameObject};
-
+use terminal_toys::snake::{GameObject, Input, SnakeGame};
 
 extern "C" {
     #[allow(dead_code)]
@@ -15,7 +14,7 @@ const W: usize = 20;
 const H: usize = 10;
 const WALL: char = '#';
 
-#[link(name="cread")]
+#[link(name = "cread")]
 extern "C" {
     fn setup();
     fn read_char() -> i32;
@@ -28,7 +27,9 @@ fn input_loop(
     quit_rec: Arc<Mutex<mpsc::Receiver<()>>>,
 ) -> impl FnOnce() -> () {
     move || {
-        unsafe { setup(); }
+        unsafe {
+            setup();
+        }
         loop {
             if let Ok(()) = quit_rec.lock().unwrap().try_recv() {
                 break;
@@ -41,7 +42,7 @@ fn input_loop(
                 b's' => Input::Down,
                 b'a' => Input::Left,
                 b'd' => Input::Right,
-                _   => Input::Undefined,
+                _ => Input::Undefined,
             };
             if let Input::Undefined = input {
                 if c == b'q' {
@@ -54,7 +55,9 @@ fn input_loop(
                 break;
             }
         }
-        unsafe { teardown(); }
+        unsafe {
+            teardown();
+        }
     }
 }
 
@@ -65,9 +68,7 @@ fn game_loop(
 ) -> impl FnOnce() -> () {
     let mut game = SnakeGame::new(W, H).unwrap();
 
-    let horizontal_edge = std::iter::repeat(WALL)
-        .take(W + 2)
-        .collect::<String>();
+    let horizontal_edge = std::iter::repeat(WALL).take(W + 2).collect::<String>();
 
     move || loop {
         if quit_rec.lock().unwrap().try_recv().is_ok() {
@@ -82,9 +83,7 @@ fn game_loop(
         game.queue_input(input);
 
         let render = |board: &[GameObject]| {
-            let mut view = String::with_capacity(
-                W * H + W * 2 + H * 3
-            );
+            let mut view = String::with_capacity(W * H + W * 2 + H * 3);
 
             for line in board.chunks(W) {
                 view.push(WALL);
@@ -98,7 +97,8 @@ fn game_loop(
                 horizontal_edge,
                 view,
                 horizontal_edge,
-                W + 2, H + 1,
+                W + 2,
+                H + 1,
             )
         };
 
@@ -126,14 +126,13 @@ fn game_loop(
 
 fn char_from(g: &GameObject) -> char {
     match g {
-        GameObject::Apple    => 'A',
-        GameObject::Body     => 'S',
-        GameObject::Floor    => '.',
-        GameObject::Head     => 'H',
-        GameObject::Overlap  => 'X',
+        GameObject::Apple => 'A',
+        GameObject::Body => 'S',
+        GameObject::Floor => '.',
+        GameObject::Head => 'H',
+        GameObject::Overlap => 'X',
     }
 }
-
 
 fn main() {
     let (input_sender, input_receiver) = mpsc::channel();
@@ -146,11 +145,7 @@ fn main() {
         Arc::clone(&quit_sender),
         Arc::clone(&quit_receiver),
     ));
-    let game = thread::spawn(game_loop(
-        quit_sender,
-        input_receiver,
-        quit_receiver,
-    ));
+    let game = thread::spawn(game_loop(quit_sender, input_receiver, quit_receiver));
 
     let _ = game.join();
     let _ = input.join();

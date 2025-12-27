@@ -1,4 +1,4 @@
-use std::io::{self, Write, Stdout, Result as IOResult};
+use std::io::{self, Result as IOResult, Stdout, Write};
 use std::iter;
 
 /// An ascii-graphics bar to easily print out the amount of progress a program
@@ -79,11 +79,7 @@ impl ProgressBar {
     /// Create multiple bars at once to represent parallel progress.
     /// NOTE: This assumes __no other printing is done__ and automatically
     /// creates space on the command line for rows of bars.
-    pub fn multiple(
-        source_len: usize,
-        bar_len: usize,
-        count: usize,
-    ) -> Vec<Self> {
+    pub fn multiple(source_len: usize, bar_len: usize, count: usize) -> Vec<Self> {
         let n = source_len / count;
 
         // Print room down for the progressbars
@@ -138,11 +134,9 @@ impl ProgressBar {
         // Source has implied a state update, so increment progress
         self.source_progress += 1;
         if self.source_progress % self.threshold == 0 {
-            let index = self.bar.iter()
-                .position(|x| *x == b'.')
-                .unwrap_or(0);
+            let index = self.bar.iter().position(|x| *x == b'.').unwrap_or(0);
             self.bar[index] = b'=';
-            return true
+            return true;
         }
         false
     }
@@ -150,15 +144,13 @@ impl ProgressBar {
     /// Print based on terminal row on which to position the bar.
     fn print(&mut self) -> IOResult<()> {
         // Flag to choose the right ending based on the bar being full or not
-        let bar_progress = self.bar.iter()
-            .rposition(|x| *x == b'=')
-            .unwrap_or(0) + 1;
+        let bar_progress = self.bar.iter().rposition(|x| *x == b'=').unwrap_or(0) + 1;
         let bar_full = self.bar.len() <= bar_progress;
 
         // Create a fitting vec for the bytes to be written
         let mut bytes = Vec::with_capacity(
             // bar         + prefix            +"] Done!"
-            self.bar.len() + self.prefix.len() + 7
+            self.bar.len() + self.prefix.len() + 7,
         );
 
         // Add the correct bytes in order:
@@ -182,7 +174,7 @@ impl ProgressBar {
 
     /// Create a string that will move the cursor down the amount of rows
     fn prefix_from(row: usize, title: &str) -> Vec<u8> {
-                        // 'B' => Move down n lines
+        // 'B' => Move down n lines
         Vec::from(format!("\x1b[{}B\r{} [", row, title).as_bytes())
     }
 

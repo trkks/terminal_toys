@@ -7,10 +7,9 @@ fn main() {
 
     // Visualize some progress in multiple threads with different length bars
     let mut handles = vec![];
-    for (i, mut bar)
-        in ProgressBar::multiple(n, 20, threads)
-            .into_iter()
-            .enumerate()
+    for (i, mut bar) in ProgressBar::multiple(n, 20, threads)
+        .into_iter()
+        .enumerate()
     {
         bar.title(&format!("Thread #{}", i));
         handles.push(std::thread::spawn(move || {
