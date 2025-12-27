@@ -1,4 +1,4 @@
-use terminal_toys::{smärgs, smargs};
+use terminal_toys::smargs;
 use std::{str::FromStr, fmt::Display};
 
 
@@ -46,19 +46,17 @@ impl std::error::Error for TextErrorMessage { }
 type RegistrationInfo = (String, usize, smargs::Result<NonEmptyString>, String, bool);
 
 fn parse(args: impl DoubleEndedIterator<Item=String>) -> Result<RegistrationInfo, Box<smargs::Break>> {
-    smärgs!(
+    smargs::arguments!(
         "Register for a service",
+        ("Your full name",                    [],                smargs::Argument::Required),
+        ("Your age",                          ["a", "age"],      smargs::Argument::Required),
         (
-            ("Your full name",                    [],                Kind::Required),
-            ("Your age",                          ["a", "age"],      Kind::Required),
-            (
-                "Email address without domain e.g. if address is 'foo@bar.baz' provide the 'foo' part",
-                ["e"],
-                Kind::Maybe
-            ),
-            ("Email address domain",              ["d"],             Kind::Optional("coolnewz.com")),
-            ("Opt-out from receiving newsletter", ["no-newsletter"], Kind::Flag),
+            "Email address without domain e.g. if address is 'foo@bar.baz' provide the 'foo' part",
+            ["e"],
+            smargs::Argument::Maybe
         ),
+        ("Email address domain",              ["d"],             smargs::Argument::Optional("coolnewz.com")),
+        ("Opt-out from receiving newsletter", ["no-newsletter"], smargs::Argument::Flag),
     )
     .help_default()
     .parse(args)

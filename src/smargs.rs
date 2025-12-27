@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 /// Return pattern for all required argument kinds.
 macro_rules! required_kinds {
     () => {
-        Kind::Required | Kind::List(1..)
+        Argument::Required | Argument::List(1..)
     };
 }
 
@@ -181,7 +181,7 @@ where
     /// definitions in tuple form.
     pub fn with_definition<const N: usize>(
         desc: &'static str,
-        definition: [(&'static str, Vec<&'static str>, Kind); N],
+        definition: [(&'static str, Vec<&'static str>, Argument); N],
     ) -> Self {
         let mut smargs = Smargs::new(desc);
         for (s, ks, k) in definition {
@@ -217,13 +217,13 @@ where
         // Handle missing values based on kinds and defaults.
         for (i, value) in values.iter_mut().enumerate().filter(|(_, x)| x.is_none()) {
             let fillin = match self.list[i].kind {
-                Kind::Optional(default) => Value::Just(default.to_owned()),
-                Kind::Flag | Kind::Help => Value::Just(false.to_string()),
+                Argument::Optional(default) => Value::Just(default.to_owned()),
+                Argument::Flag | Argument::Help => Value::Just(false.to_string()),
                 required_kinds!() => {
                     return Err(help.short_break(Error::Missing(self.list[i].clone())));
                 }
-                Kind::List(_) => Value::List(vec![]),
-                Kind::Maybe => Value::None,
+                Argument::List(_) => Value::List(vec![]),
+                Argument::Maybe => Value::None,
             };
             value.replace(fillin);
         }
@@ -258,7 +258,7 @@ where
         self.push(Smarg {
             desc: "Show this help message",
             keys,
-            kind: Kind::Help,
+            kind: Argument::Help,
             value: Value::None,
         });
 
@@ -283,9 +283,9 @@ where
                         .max()
                         .unwrap_or(x.desc);
                     match x.kind {
-                        Kind::Help => None,
-                        Kind::Required => Some(format!("<{}>", display)),
-                        Kind::Flag => Some(format!(
+                        Argument::Help => None,
+                        Argument::Required => Some(format!("<{}>", display)),
+                        Argument::Flag => Some(format!(
                             "[-{}]",
                             if display.len() > 1 {
                                 format!("-{}", display)
@@ -293,7 +293,7 @@ where
                                 display.to_string()
                             }
                         )),
-                        Kind::List(_) | Kind::Optional(_) | Kind::Maybe => {
+                        Argument::List(_) | Argument::Optional(_) | Argument::Maybe => {
                             Some(format!("[{}]", display))
                         }
                     }
@@ -307,7 +307,7 @@ where
         let mut short = usage.clone();
         if let Smarg {
             keys,
-            kind: Kind::Help,
+            kind: Argument::Help,
             ..
         } = &self.list[0]
         {
@@ -493,9 +493,9 @@ where
         Self::validate_key_names(&smarg.keys);
 
         // Get the correct index to insert (not push) into.
-        let handle = if let Kind::Help = smarg.kind {
+        let handle = if let Argument::Help = smarg.kind {
             if let Some(Smarg {
-                kind: Kind::Help, ..
+                kind: Argument::Help, ..
             }) = self.list.get(0)
             {
                 panic!("the help argument can not be defined more than once");
@@ -599,7 +599,7 @@ impl ValueParserState {
             .find_map(|(i, x)|
                 (
                     x.kind.is_required() && self.values[i].is_none()
-                    || matches!((&x.kind, &self.values[i]), (Kind::List(n), Some(Value::List(xs))) if xs.len() < *n)
+                    || matches!((&x.kind, &self.values[i]), (Argument::List(n), Some(Value::List(xs))) if xs.len() < *n)
                 )
                 .then_some(i)
             );
@@ -624,13 +624,13 @@ impl ValueParserState {
             .expect("position not found");
 
         match smarg.kind {
-            Kind::Help => {
+            Argument::Help => {
                 // In case help is requested in the arguments e.g.
                 // in the form of `--help`, interrupt the parsing
                 // here and return the more detailed help-message.
                 return Err(help.long_break(Error::Help));
             }
-            Kind::Flag => {
+            Argument::Flag => {
                 if let Some(first_val) =
                     self.values[key_matched_index].replace(Value::Just(true.to_string()))
                 {
@@ -653,7 +653,7 @@ impl ValueParserState {
                     "should be impossible to overwrite flag's history"
                 );
             }
-            Kind::List(_min) => {
+            Argument::List(_min) => {
                 if let Some(list) = self.values[key_matched_index].as_mut() {
                     if let Some(value) = self.stack.pop() {
                         list.push(value);
@@ -829,7 +829,7 @@ impl fmt::Display for Error {
 pub struct Smarg {
     pub desc: &'static str,
     pub keys: Vec<&'static str>,
-    pub kind: Kind,
+    pub kind: Argument,
     pub value: Value,
 }
 
@@ -847,11 +847,11 @@ impl Display for Smarg {
         };
 
         let note = match &self.kind {
-            Kind::Required => "<REQUIRED>".to_owned(),
-            Kind::Optional(default) => format!("<VALUE default '{}'>", default),
-            Kind::Flag | Kind::Help => "".to_owned(),
-            Kind::List(n) => format!("[<VALUE>; {}]", n),
-            Kind::Maybe => "<VALUE>".to_owned(),
+            Argument::Required => "<REQUIRED>".to_owned(),
+            Argument::Optional(default) => format!("<VALUE default '{}'>", default),
+            Argument::Flag | Argument::Help => "".to_owned(),
+            Argument::List(n) => format!("[<VALUE>; {}]", n),
+            Argument::Maybe => "<VALUE>".to_owned(),
         };
 
         write!(f, "{}{} - {}", keystring, note, self.desc)
@@ -860,7 +860,7 @@ impl Display for Smarg {
 
 /// Describes the argument and how it is supplied.
 #[derive(Debug, Clone)]
-pub enum Kind {
+pub enum Argument {
     /// Special flag for requesting the help message.
     Help,
     /// An argument which __needs__ to be provided by the user.
@@ -880,7 +880,7 @@ pub enum Kind {
     Maybe,
 }
 
-impl Kind {
+impl Argument {
     /// Return whether this represents a required argument.
     fn is_required(&self) -> bool {
         matches!(self, required_kinds!())
@@ -941,7 +941,7 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 #[cfg(test)]
 mod tests {
-    use super::{Arg, Break, Error, Key, Kind, List, Result, Smarg, Smargs, Value};
+    use super::{Arg, Break, Error, Key, Argument, List, Result, Smarg, Smargs, Value};
 
     // NOTE: Naming conventions:
     // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
@@ -955,8 +955,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], Kind::Required),
-                ("B", vec!["b"], Kind::Required),
+                ("A", vec!["a"], Argument::Required),
+                ("B", vec!["b"], Argument::Required),
             ],
         )
         .parse("x 0 1".split(' ').map(String::from))
@@ -971,8 +971,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], Kind::Required),
-                ("B", vec!["b"], Kind::Required),
+                ("A", vec!["a"], Argument::Required),
+                ("B", vec!["b"], Argument::Required),
             ],
         )
         .parse("x -a 0 1".split(' ').map(String::from))
@@ -987,8 +987,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["aa"], Kind::Required),
-                ("B", vec!["b"], Kind::Required),
+                ("A", vec!["aa"], Argument::Required),
+                ("B", vec!["b"], Argument::Required),
             ],
         )
         .parse("x --aa 0 1".split(' ').map(String::from))
@@ -1003,8 +1003,8 @@ mod tests {
         let (a, b) = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], Kind::Required),
-                ("B", vec!["b"], Kind::Required),
+                ("A", vec!["a"], Argument::Required),
+                ("B", vec!["b"], Argument::Required),
             ],
         )
         .parse("x -b 1 0".split(' ').map(String::from))
@@ -1017,7 +1017,7 @@ mod tests {
     #[test]
     fn parse_req_int_by_position_looks_like_key_res_req_from_position() {
         let (a,) =
-            Smargs::<(i32,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(i32,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .parse("x -1".split(' ').map(String::from))
                 .unwrap();
 
@@ -1029,8 +1029,8 @@ mod tests {
         let (s, a) = Smargs::<(String, usize)>::with_definition(
             "Test program",
             [
-                ("S", vec!["s"], Kind::Required),
-                ("A", vec!["a"], Kind::Optional("0")),
+                ("S", vec!["s"], Argument::Required),
+                ("A", vec!["a"], Argument::Optional("0")),
             ],
         )
         .parse("x -s -a".split(' ').map(String::from))
@@ -1045,7 +1045,7 @@ mod tests {
     //#[test]
     fn parse_req_string_by_position_looks_like_key_res_req_from_position() {
         let (s,) =
-            Smargs::<(String,)>::with_definition("Test program", [("S", vec![], Kind::Required)])
+            Smargs::<(String,)>::with_definition("Test program", [("S", vec![], Argument::Required)])
                 .parse("x -s".split(' ').map(String::from))
                 .unwrap();
 
@@ -1056,7 +1056,7 @@ mod tests {
     fn parse_no_opt_res_opt_from_default() {
         let (a,) = Smargs::<(usize,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Kind::Optional("0"))],
+            [("A", vec!["a"], Argument::Optional("0"))],
         )
         .parse("x".split(' ').map(String::from))
         .unwrap();
@@ -1068,7 +1068,7 @@ mod tests {
     fn parse_opt_by_key_res_opt_from_value() {
         let (a,) = Smargs::<(usize,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Kind::Optional("1"))],
+            [("A", vec!["a"], Argument::Optional("1"))],
         )
         .parse("x -a 0".split(' ').map(String::from))
         .unwrap();
@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn parse_no_flag_res_flag_from_false() {
         let (a,) =
-            Smargs::<(bool,)>::with_definition("Test program", [("A", vec!["a"], Kind::Flag)])
+            Smargs::<(bool,)>::with_definition("Test program", [("A", vec!["a"], Argument::Flag)])
                 .parse("x".split(' ').map(String::from))
                 .unwrap();
 
@@ -1089,7 +1089,7 @@ mod tests {
     #[test]
     fn parse_flag_by_key_res_flag_from_true() {
         let (a,) =
-            Smargs::<(bool,)>::with_definition("Test program", [("A", vec!["a"], Kind::Flag)])
+            Smargs::<(bool,)>::with_definition("Test program", [("A", vec!["a"], Argument::Flag)])
                 .parse("x -a".split(' ').map(String::from))
                 .unwrap();
 
@@ -1101,8 +1101,8 @@ mod tests {
         let (a, b) = Smargs::<(bool, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], Kind::Flag),
-                ("B", vec!["b"], Kind::Required),
+                ("A", vec!["a"], Argument::Flag),
+                ("B", vec!["b"], Argument::Required),
             ],
         )
         .parse("x -ab 1".split(' ').map(String::from))
@@ -1116,7 +1116,7 @@ mod tests {
     fn parse_list2_by_keys_res_list2_from_values() {
         let (a,) = Smargs::<(List<usize>,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Kind::List(2))],
+            [("A", vec!["a"], Argument::List(2))],
         )
         .parse("x -a 0 -a 1".split(' ').map(String::from))
         .unwrap();
@@ -1130,7 +1130,7 @@ mod tests {
     fn parse_list2_fst_by_position_snd_by_key_res_fst_from_position_snd_from_key() {
         let (a,) = Smargs::<(List<usize>,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Kind::List(2))],
+            [("A", vec!["a"], Argument::List(2))],
         )
         .parse("x 0 -a 1".split(' ').map(String::from))
         .unwrap();
@@ -1143,7 +1143,7 @@ mod tests {
     fn parse_maybe_by_key_res_maybe_from_value() {
         let (a,) = Smargs::<(Result<usize>,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Kind::Maybe)],
+            [("A", vec!["a"], Argument::Maybe)],
         )
         .parse("x -a 0".split(' ').map(String::from))
         .unwrap();
@@ -1157,7 +1157,7 @@ mod tests {
     fn parse_req_by_position_no_maybe_res_req_from_position_maybe_errors_missing() {
         let (a, b) = Smargs::<(usize, Result<usize>)>::with_definition(
             "Test program",
-            [("A", vec![], Kind::Required), ("B", vec!["b"], Kind::Maybe)],
+            [("A", vec![], Argument::Required), ("B", vec!["b"], Argument::Maybe)],
         )
         .parse("x 0".split(' ').map(String::from))
         .unwrap();
@@ -1167,7 +1167,7 @@ mod tests {
         assert!(
             matches!(
                 b_err,
-                Error::Missing(Smarg { desc, ref keys, kind: Kind::Maybe, value: Value::None }) if desc == "B" && keys[0] == "b",
+                Error::Missing(Smarg { desc, ref keys, kind: Argument::Maybe, value: Value::None }) if desc == "B" && keys[0] == "b",
             ),
             "{}",
             b_err
@@ -1180,9 +1180,9 @@ mod tests {
         let (a, b, c) = Smargs::<(usize, usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], Kind::Required),
-                ("B", vec!["b"], Kind::Optional("1")),
-                ("C", vec!["c"], Kind::Required),
+                ("A", vec!["a"], Argument::Required),
+                ("B", vec!["b"], Argument::Optional("1")),
+                ("C", vec!["c"], Argument::Required),
             ],
         )
         .parse("x 0 2".split(' ').map(String::from))
@@ -1210,7 +1210,7 @@ mod tests {
     #[test]
     fn parse_no_1st_req_help_by_key_res_errors_generated_help() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .help_default()
                 .parse("x --help".split(' ').map(String::from))
                 .unwrap_err();
@@ -1225,7 +1225,7 @@ mod tests {
     #[test]
     fn parse_req_by_key_fst_help_by_key_res_errors_generated_help() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .help_default()
                 .parse("x -a 0 --help".split(' ').map(String::from))
                 .unwrap_err();
@@ -1242,13 +1242,13 @@ mod tests {
     #[test]
     fn parse_no_req_res_errors_req_arg_missing_value() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .parse("x".split(' ').map(String::from))
                 .unwrap_err();
 
         assert!(matches!(
             *err,
-            Break { err: Error::Missing(Smarg { desc, keys, kind: Kind::Required, value: Value::None }), .. } if desc == "A" && keys[0] == "a",
+            Break { err: Error::Missing(Smarg { desc, keys, kind: Argument::Required, value: Value::None }), .. } if desc == "A" && keys[0] == "a",
         ));
     }
 
@@ -1257,8 +1257,8 @@ mod tests {
         let err = Smargs::<(usize, usize)>::with_definition(
             "Test program",
             [
-                ("A", vec!["a"], Kind::Required),
-                ("B", vec!["b"], Kind::Optional("1")),
+                ("A", vec!["a"], Argument::Required),
+                ("B", vec!["b"], Argument::Optional("1")),
             ],
         )
         .parse("x 0 2".split(' ').map(String::from))
@@ -1274,7 +1274,7 @@ mod tests {
     #[test]
     fn parse_multiple_reqs_by_pos_res_errors_undefined_argument() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec![], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec![], Argument::Required)])
                 .parse("x 0 1".split(' ').map(String::from))
                 .unwrap_err();
 
@@ -1292,7 +1292,7 @@ mod tests {
     #[test]
     fn parse_multiple_reqs_by_key_res_errors_duplicate_value() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .parse("x -a 0 -a 1".split(' ').map(String::from))
                 .unwrap_err();
 
@@ -1321,7 +1321,7 @@ mod tests {
     #[test]
     fn parse_req_by_key_no_value_res_errors_req_arg_missing_value() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .parse("x -a".split(' ').map(String::from))
                 .unwrap_err();
 
@@ -1329,7 +1329,7 @@ mod tests {
             *err,
             Break {
                 err: Error::Missing(Smarg {
-                    kind: Kind::Required,
+                    kind: Argument::Required,
                     ..
                 }),
                 ..
@@ -1341,7 +1341,7 @@ mod tests {
     fn parse_opt_by_key_no_value_res_errors_opt_arg_missing_value() {
         let err = Smargs::<(usize,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Kind::Optional("0"))],
+            [("A", vec!["a"], Argument::Optional("0"))],
         )
         .parse("x -a".split(' ').map(String::from))
         .unwrap_err();
@@ -1350,7 +1350,7 @@ mod tests {
             *err,
             Break {
                 err: Error::Missing(Smarg {
-                    kind: Kind::Optional(_),
+                    kind: Argument::Optional(_),
                     ..
                 }),
                 ..
@@ -1361,7 +1361,7 @@ mod tests {
     #[test]
     fn parse_req_by_position_undefined_key_no_value_res_errors_undefined_key() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .parse("x 0 -b".split(' ').map(String::from))
                 .unwrap_err();
 
@@ -1374,7 +1374,7 @@ mod tests {
     #[test]
     fn parse_req_by_position_bad_value_res_errors_parsing_failed() {
         let err =
-            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Kind::Required)])
+            Smargs::<(usize,)>::with_definition("Test program", [("A", vec!["a"], Argument::Required)])
                 .parse("x -1".split(' ').map(String::from))
                 .unwrap_err();
 
@@ -1394,7 +1394,126 @@ mod tests {
     fn from_init_tuple_flags_have_same_key_res_panics() {
         let _ = Smargs::<(bool, bool)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Kind::Flag), ("Aa", vec!["a"], Kind::Flag)],
+            [("A", vec!["a"], Argument::Flag), ("Aa", vec!["a"], Argument::Flag)],
         );
     }
 }
+
+/// # Usage
+/// ```
+/// let (foo, bar, baz) = terminal_toys::smargs::arguments!(
+///     "Example description",
+///     ("Is Foo",   ["f", "foo"], terminal_toys::smargs::Argument::Optional("42")),
+///     ("Sets Bar", ["b"],        terminal_toys::smargs::Argument::Flag),
+///     ("Uses Baz", [],           terminal_toys::smargs::Argument::Required),
+/// )
+/// .parse(vec!["x", "-b", "Bazbaz"].into_iter().map(String::from))
+/// .unwrap();
+/// 
+/// assert_eq!(foo, 42_usize);
+/// assert_eq!(bar, true);
+/// assert_eq!(baz, "Bazbaz".to_owned());
+/// ```
+/// # `arguments!`
+/// Convenience-macro for describing your program and its expected arguments,
+/// constructing a `Smargs` instance and then parsing the actual arguments.
+///
+/// Arguments are defined using a list of tuples `(description, keys, kind)` and
+/// parsed from an `Iterator<Item = String>` into types of the __local__ `Arguments` -struct.
+///
+/// # Examples
+/// ```
+/// # fn main() -> Result<(), String> {
+/// use terminal_toys::smargs::{arguments, Argument};
+///
+/// let args = vec![
+///    "register",
+///    "--no-newsletter",
+///    "-a", "26",
+///    "-d", "hatch",
+///    "Matt", "-n", "Myman", "-n", "Jr"
+/// ];
+/// 
+/// let (names, age, domain, no_news) = arguments!(
+///     "Register for service",
+///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
+///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
+///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
+///     ("Your age",                              ["a", "age"],      Argument::Required),
+/// )
+/// .parse(args.into_iter().map(String::from))
+/// .map_err(|e| e.to_string())?;
+/// 
+/// let mut newsletter_subscribers = vec![];
+///
+/// if age < 18 {
+///     let ys = 18 - age;
+///     let putdown = format!(
+///         "come back in {}",
+///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
+///     );
+///     eprintln!("Failed to register: {}", putdown);
+///     std::process::exit(1);
+/// }
+///
+/// let user_email = format!("{}.{}@{}.com", names.0.join("."), age, domain).replace(' ', ".").to_lowercase();
+///
+/// let subscriber_count = newsletter_subscribers.len();
+/// if !no_news {
+///     newsletter_subscribers.push(&user_email);
+/// }
+///
+/// assert_eq!(user_email, "matt.myman.jr.26@hatch.com".to_string());
+/// assert_eq!(newsletter_subscribers.len(), subscriber_count);
+/// # Ok(()) }
+/// ```
+/// Required arguments can be parsed based on the order in the macro's
+/// definition-list. Missing, but optional, arguments use the given default
+/// value.
+/// ```
+/// # fn main() -> Result<(), String> {
+/// use terminal_toys::smargs::{arguments, Argument};
+///
+/// let args = vec!["register.exe", "Matt Myman", "26"];
+/// 
+/// let (names, age, domain, no_news) = arguments!(
+///     "Register for service",
+///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
+///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
+///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
+///     ("Your age",                              ["a", "age"],      Argument::Required)
+/// )
+/// .parse(args.into_iter().map(String::from))
+/// .map_err(|e| e.to_string())?;
+/// 
+/// assert!(!no_news);
+/// assert_eq!(names, vec!["Matt Myman"]);
+/// assert_eq!(domain, "getspam".to_string());
+/// assert_eq!(age, 26);
+/// # Ok(()) }
+/// ```
+#[macro_export] macro_rules! arguments {
+    // Tuple-container (that is pre-impl'd).
+    ( $program_desc:literal, $( ($arg_desc:literal, $keys:expr, $kind:expr) $(,)? ),+ ) => {
+       {
+            use terminal_toys::{
+                smargs::{Smargs, Smarg, Argument, Error, Value}
+            };
+
+            let mut smargs = Smargs::new($program_desc);
+            $(
+                smargs.push(Smarg {
+                    desc: $arg_desc,
+                    keys: $keys.to_vec(),
+                    kind: $kind,
+                    value: Value::None,
+                });
+            )+
+
+            smargs
+        }
+    };
+}
+
+
+pub use arguments;
