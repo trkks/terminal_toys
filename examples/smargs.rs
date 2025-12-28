@@ -41,11 +41,11 @@ impl Display for TextErrorMessage {
 impl std::error::Error for TextErrorMessage {}
 
 /// Custom output type.
-type RegistrationInfo = (String, usize, smargs::Result<NonEmptyString>, String, bool);
+type RegistrationInfo = (String, usize, String, String, bool);
 
 fn parse(
     args: impl DoubleEndedIterator<Item = String>,
-) -> Result<RegistrationInfo, Box<smargs::Break>> {
+) -> Result<RegistrationInfo, smargs::Error> {
     smargs::arguments!(
         "Register for a service",
         ("Your full name", [], smargs::Argument::Required),
@@ -53,7 +53,7 @@ fn parse(
         (
             "Email address without domain e.g. if address is 'foo@bar.baz' provide the 'foo' part",
             ["e"],
-            smargs::Argument::Maybe
+            smargs::Argument::Optional("")
         ),
         (
             "Email address domain",
@@ -85,7 +85,7 @@ fn use_example_args() -> bool {
 fn construct_email(
     name: String,
     age: usize,
-    local_part: smargs::Result<NonEmptyString>,
+    local_part: String,
     domain: String,
 ) -> Result<String, smargs::Error> {
     let split = domain.rsplit_once('.');
@@ -98,16 +98,14 @@ fn construct_email(
         ))))),
     }?;
 
-    let local_part = local_part.0.or_else(|e| {
-        if let smargs::Error::Missing(_) | smargs::Error::Parsing { .. } = e {
+    let local_part = if local_part.is_empty() {
             eprintln!("Constructing default local part for email");
-            Ok(NonEmptyString(format!("{}.{}", name, age)))
+            format!("{}.{}", name, age)
         } else {
-            Err(e)
-        }
-    })?;
+            local_part
+        };
 
-    Ok(format!("{}@{}.{}", local_part.0, domain, tld)
+    Ok(format!("{}@{}.{}", local_part, domain, tld)
         .replace(' ', ".")
         .to_lowercase())
 }
@@ -133,11 +131,8 @@ fn main() {
         let x = match parse(std::env::args()) {
             Err(e)
                 if matches!(
-                    *e,
-                    smargs::Break {
-                        err: smargs::Error::Missing(_),
-                        ..
-                    }
+                    e,
+                    smargs::Error::Missing(_),
                 ) && use_example_args() =>
             {
                 // Use some hard-coded args for demonstration.

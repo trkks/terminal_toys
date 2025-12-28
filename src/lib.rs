@@ -1,3 +1,7 @@
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
+
 pub mod progress_bar;
 pub mod smargs;
 pub mod snake;
@@ -5,10 +9,6 @@ pub mod spinner;
 
 // Re-exports the struct to be directly used from `terminal_toys`
 pub use progress_bar::ProgressBar;
-
-#[doc = include_str!("../README.md")]
-#[cfg(doctest)]
-pub struct ReadmeDoctests;
 
 /// String sequences that when printed start coloring the following text. Note
 /// that to stop the coloring (i.e., return back to "normal), append whatever

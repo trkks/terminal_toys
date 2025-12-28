@@ -84,7 +84,7 @@ pub trait FromSmarg: Sized {
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error>;
 }
 
-impl<T> FromSmarg for List<T>
+impl<T> FromSmarg for Vec<T>
 where
     T: FromStr + fmt::Debug,
     <T as FromStr>::Err: error::Error + 'static,
@@ -92,12 +92,12 @@ where
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
         match &smarg.value {
             Value::None => Err(Error::Missing(smarg)),
-            Value::Just(x) => Ok(List(vec![<T as FromStr>::from_str(x).map_err(|e| {
+            Value::Just(x) => Ok(vec![<T as FromStr>::from_str(x).map_err(|e| {
                 Error::Parsing {
                     of: smarg,
                     failed_with: Box::new(e),
                 }
-            })?])),
+            })?]),
             Value::List(xs) => {
                 let mut results: Vec<Option<StdResult<T, _>>> = xs
                     .iter()
@@ -118,41 +118,38 @@ where
                     })
                 } else {
                     let values = results.into_iter().map(|x| x.unwrap().unwrap()).collect();
-                    Ok(List(values))
+                    Ok(values)
                 }
             }
         }
     }
 }
 
-impl<T> FromSmarg for T
-where
-    T: FromStr,
-    <T as FromStr>::Err: error::Error + 'static,
-{
-    fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
-        match &smarg.value {
-            Value::None => Err(Error::Missing(smarg)),
-            Value::Just(x) => <T as FromStr>::from_str(x).map_err(|e| Error::Parsing {
-                of: smarg.clone(),
-                failed_with: Box::new(e),
-            }),
-            Value::List(_xs) => panic!("bad"),
+// TODO Implement all the plausible types with a macro.
+/// Mass-implement `FromSmarg` for all plausible std basic types.
+macro_rules! fromsmarg_impl {
+    ( $t:ty ) => {
+        impl FromSmarg for $t {
+            fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
+                match &smarg.value {
+                    Value::None => Err(Error::Missing(smarg)),
+                    Value::Just(x) => x.parse().map_err(|e| Error::Parsing {
+                        of: smarg.clone(),
+                        failed_with: Box::new(e),
+                    }),
+                    Value::List(_xs) => panic!("bad"),
+                }
+            }
         }
-    }
+    };
 }
 
-/// Wrapper to `Vec` that allows support for multiple values per one argument
-/// definition.
-/// TODO: Make this always contain a minimum number of items to work together
-/// with the SmargKind::List(min).
-pub struct List<T: FromStr>(pub Vec<T>);
+fromsmarg_impl!(usize);
+fromsmarg_impl!(i32);
+fromsmarg_impl!(String);
+fromsmarg_impl!(bool);
+fromsmarg_impl!(std::path::PathBuf);
 
-impl<T: FromStr> From<List<T>> for Vec<T> {
-    fn from(value: List<T>) -> Self {
-        value.0
-    }
-}
 
 /// Struct for defining program arguments and parsing them from command line
 /// syntax into required types.
@@ -168,8 +165,8 @@ pub struct Smargs<Ts> {
     list: Vec<Smarg>,
     /// Mapping of keys to to positions.
     map: HashMap<String, usize>,
-    /// NOTE: This is here in order to support the `smärgs`-macro implementing
-    /// `TryFrom<Smargs<_>> for CustomOutput`.
+    /// NOTE: This is here in order to support the `arguments`-macro implementing
+    /// `TryFrom<Smargs<_>> for MyOutput`.
     output: PhantomData<Ts>,
 }
 
@@ -204,7 +201,7 @@ where
     pub fn parse(
         mut self,
         mut args: impl DoubleEndedIterator<Item = String>,
-    ) -> StdResult<Ts, Box<Break>> {
+    ) -> StdResult<Ts, Error> {
         if let Some(name) = args.next() {
             self.name = name;
         }
@@ -220,7 +217,7 @@ where
                 Argument::Optional(default) => Value::Just(default.to_owned()),
                 Argument::Flag | Argument::Help => Value::Just(false.to_string()),
                 required_kinds!() => {
-                    return Err(help.short_break(Error::Missing(self.list[i].clone())));
+                    return Err(Error::Missing(self.list[i].clone()));
                 }
                 Argument::List(_) => Value::List(vec![]),
                 Argument::Maybe => Value::None,
@@ -237,11 +234,11 @@ where
             self.list[i].value = value;
         }
 
-        Ts::try_from(self).map_err(|err| help.short_break(err))
+        Ts::try_from(self)
     }
 
     /// Creates `T` based on a call to `std::env::args`.
-    pub fn from_env(self) -> StdResult<Ts, Box<Break>> {
+    pub fn from_env(self) -> StdResult<Ts, Error> {
         self.parse(std::env::args())
     }
 
@@ -364,7 +361,7 @@ where
         &self,
         args: impl DoubleEndedIterator<Item = String>,
         help: &Help,
-    ) -> StdResult<Vec<Option<Value>>, Box<Break>> {
+    ) -> StdResult<Vec<Option<Value>>, Error> {
         let mut state: ValueParserState = ValueParserState::new(args, self.list.len());
         state.rindex = self.list.iter().position(|x| x.kind.is_required());
 
@@ -409,17 +406,17 @@ where
                     // key-value method.
                     let idx = state
                         .rindex
-                        .ok_or_else(|| help.short_break(Error::UndefinedArgument(arg.clone())))?;
+                        .ok_or_else(|| Error::UndefinedArgument(arg.clone()))?;
                     if let Some(first_val) =
                         state.values[idx].replace(Value::Just(arg.clone().value))
                     {
-                        return Err(help.short_break(Error::Duplicate {
+                        return Err(Error::Duplicate {
                             first: (
                                 state.history[idx].as_mut().unwrap().pop().unwrap(),
                                 first_val,
                             ),
                             extra: (arg, state.values[idx].take().unwrap()),
-                        }));
+                        });
                     }
                     state.next_unsatisfied_required_position(&self.list);
                 }
@@ -613,11 +610,11 @@ impl ValueParserState {
         smargs: &Smargs<Ts>,
         arg: Arg,
         help: &Help,
-    ) -> StdResult<(), Box<Break>> {
+    ) -> StdResult<(), Error> {
         let key_matched_index = *smargs
             .map
             .get(&arg.value)
-            .ok_or_else(|| help.short_break(Error::UndefinedKey(arg.clone())))?;
+            .ok_or_else(|| Error::UndefinedKey(arg.clone()))?;
 
         let smarg = smargs
             .list
@@ -629,13 +626,13 @@ impl ValueParserState {
                 // In case help is requested in the arguments e.g.
                 // in the form of `--help`, interrupt the parsing
                 // here and return the more detailed help-message.
-                return Err(help.long_break(Error::Help));
+                return Err(Error::Help);
             }
             Argument::Flag => {
                 if let Some(first_val) =
                     self.values[key_matched_index].replace(Value::Just(true.to_string()))
                 {
-                    return Err(help.short_break(Error::Duplicate {
+                    return Err(Error::Duplicate {
                         first: (
                             self.history[key_matched_index]
                                 .as_mut()
@@ -645,7 +642,7 @@ impl ValueParserState {
                             first_val,
                         ),
                         extra: (arg, self.values[key_matched_index].take().unwrap()),
-                    }));
+                    });
                 }
                 // Update history; index matches with chosen value.
                 let history = vec![arg];
@@ -659,8 +656,8 @@ impl ValueParserState {
                     if let Some(value) = self.stack.pop() {
                         list.push(value);
                     } else {
-                        return Err(help
-                            .short_break(Error::Missing(smargs.list[key_matched_index].clone())));
+                        return Err(
+                            Error::Missing(smargs.list[key_matched_index].clone()));
                     }
                 }
                 // Update history; index matches with chosen value.
@@ -675,7 +672,7 @@ impl ValueParserState {
                     if let Some(first_val) =
                         self.values[key_matched_index].replace(Value::Just(value))
                     {
-                        return Err(help.short_break(Error::Duplicate {
+                        return Err(Error::Duplicate {
                             first: (
                                 self.history[key_matched_index]
                                     .as_mut()
@@ -685,7 +682,7 @@ impl ValueParserState {
                                 first_val,
                             ),
                             extra: (arg, self.values[key_matched_index].take().unwrap()),
-                        }));
+                        });
                     }
                     // Update the position because this required was received
                     // based on key-value.
@@ -697,7 +694,7 @@ impl ValueParserState {
                         "should be impossible to overwrite option's history"
                     );
                 } else {
-                    return Err(help.short_break(Error::Missing(smarg.clone())));
+                    return Err(Error::Missing(smarg.clone()));
                 }
             }
         }
@@ -722,33 +719,6 @@ struct Help {
     long: String,
 }
 
-impl Help {
-    fn short_break(&self, err: Error) -> Box<Break> {
-        Box::new(Break {
-            err,
-            help: self.short.clone(),
-        })
-    }
-
-    fn long_break(&self, err: Error) -> Box<Break> {
-        Box::new(Break {
-            err,
-            help: self.long.clone(),
-        })
-    }
-}
-
-/// The reason for interruption or "break" when parsing based on `Smargs` can
-/// either be because an error occurred or because of an explicit help-request
-/// to describe the program by its arguments.
-/// TODO: `impl ops::Try for Break`?
-#[derive(Debug)]
-pub struct Break {
-    pub err: Error,
-    pub help: String,
-}
-
-impl error::Error for Break {}
 
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
@@ -775,13 +745,6 @@ pub enum Error {
     UndefinedArgument(Arg),
     /// No match found for given key.
     UndefinedKey(Arg),
-}
-
-/// Select between generic or argument-specific error messages.
-impl fmt::Display for Break {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Interrupted because {}\n\n{}", self.err, self.help)
-    }
 }
 
 /// Generate nicer error-messages to print for user.
@@ -876,7 +839,7 @@ pub enum Argument {
     /// A collection of some minimum number of arguments.
     List(usize),
     /// An argument that returns with its error instead of interrupting (i.e.,
-    /// `Break`ing) so the default can be computed after when parsing has
+    /// breaking) so the default can be computed after when parsing has
     /// failed.
     Maybe,
 }
@@ -942,7 +905,7 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 #[cfg(test)]
 mod tests {
-    use super::{Arg, Argument, Break, Error, Key, List, Result, Smarg, Smargs, Value};
+    use super::{Arg, Argument,  Error, Key, Result, Smarg, Smargs, Value};
 
     // NOTE: Naming conventions:
     // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
@@ -1119,29 +1082,29 @@ mod tests {
 
     #[test]
     fn parse_list2_by_keys_res_list2_from_values() {
-        let (a,) = Smargs::<(List<usize>,)>::with_definition(
+        let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
             "Test program",
             [("A", vec!["a"], Argument::List(2))],
         )
         .parse("x -a 0 -a 1".split(' ').map(String::from))
         .unwrap();
 
-        assert_eq!(a.0.first(), Some(&0));
-        assert_eq!(a.0.get(1), Some(&1));
+        assert_eq!(a.first(), Some(&0));
+        assert_eq!(a.get(1), Some(&1));
     }
 
     // TODO: Is this usual/logical behaviour?
     #[test]
     fn parse_list2_fst_by_position_snd_by_key_res_fst_from_position_snd_from_key() {
-        let (a,) = Smargs::<(List<usize>,)>::with_definition(
+        let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
             "Test program",
             [("A", vec!["a"], Argument::List(2))],
         )
         .parse("x 0 -a 1".split(' ').map(String::from))
         .unwrap();
 
-        assert_eq!(a.0.first(), Some(&0));
-        assert_eq!(a.0.get(1), Some(&1));
+        assert_eq!(a.first(), Some(&0));
+        assert_eq!(a.get(1), Some(&1));
     }
 
     #[test]
@@ -1209,9 +1172,8 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break { err: Error::Help, help }
-                if !help.is_empty(),
+            err,
+            Error::Help,
         ));
     }
 
@@ -1226,9 +1188,8 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break { err: Error::Help, help }
-                if !help.is_empty(),
+            err,
+            Error::Help
         ));
     }
 
@@ -1243,9 +1204,8 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break { err: Error::Help, help }
-                if !help.is_empty(),
+            err,
+            Error::Help
         ));
     }
 
@@ -1261,8 +1221,8 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break { err: Error::Missing(Smarg { desc, keys, kind: Argument::Required, value: Value::None }), .. } if desc == "A" && keys[0] == "a",
+            err,
+            Error::Missing(Smarg { desc, keys, kind: Argument::Required, value: Value::None })
         ));
     }
 
@@ -1279,9 +1239,8 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break { err: Error::UndefinedArgument(Arg { value: s, type_: Key::Position }), .. }
-                if s == "2",
+            err,
+            Error::UndefinedArgument(Arg { value: s, type_: Key::Position })
         ));
     }
 
@@ -1296,13 +1255,9 @@ mod tests {
 
         assert!(
             matches!(
-                *err,
-                Break { err: Error::UndefinedArgument(Arg { value: ref s, type_: Key::Position }), .. }
-                    if s == "1",
-            ),
-            "{}",
-            err
-        );
+                err,
+                Error::UndefinedArgument(Arg { value: ref s, type_: Key::Position })
+        ));
     }
 
     #[test]
@@ -1316,9 +1271,9 @@ mod tests {
 
         assert!(
             matches!(
-                *err,
-                Break {
-                    err: Error::Duplicate {
+                err,
+                
+               Error::Duplicate {
                         first: (
                             Arg { value: ref fst_k, type_: Key::Short { group_size: 1 } },
                             Value::Just(ref fst_v)
@@ -1328,12 +1283,7 @@ mod tests {
                             Value::Just(ref ext_v)
                         ),
                     },
-                    ..
-                } if fst_k == "a" && fst_v == "0" && ext_k == "a" && ext_v == "1",
-            ),
-            "{}",
-            err
-        );
+        ));
     }
 
     #[test]
@@ -1346,14 +1296,11 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break {
-                err: Error::Missing(Smarg {
+            err,
+            Error::Missing(Smarg {
                     kind: Argument::Required,
                     ..
                 }),
-                ..
-            },
         ));
     }
 
@@ -1367,14 +1314,11 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break {
-                err: Error::Missing(Smarg {
+            err,
+             Error::Missing(Smarg {
                     kind: Argument::Optional(_),
                     ..
                 }),
-                ..
-            },
         ));
     }
 
@@ -1388,8 +1332,8 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            *err,
-            Break { err: Error::UndefinedKey(Arg { value: s, type_: Key::Short { group_size: 1 } }), .. } if s == "b",
+            err,
+            Error::UndefinedKey(Arg { value: s, type_: Key::Short { group_size: 1 } })
         ));
     }
 
@@ -1404,13 +1348,9 @@ mod tests {
 
         assert!(
             matches!(
-                *err,
-                Break { err: Error::Parsing { of: Smarg { value: Value::Just(ref s), .. }, failed_with: ref boxed_err }, .. }
-                    if s == "-1" && boxed_err.is::<std::num::ParseIntError>(),
-            ),
-            "{}",
-            err
-        );
+                err,
+                Error::Parsing { of: Smarg { value: Value::Just(ref s), .. }, failed_with: ref boxed_err }
+        ));
     }
 
     #[test]
@@ -1428,7 +1368,9 @@ mod tests {
 
 /// # Usage
 /// ```
-/// let (foo, bar, baz) = terminal_toys::smargs::arguments!(
+/// let (foo, bar, baz)
+///     : (usize, bool, String)
+///     = terminal_toys::smargs::arguments!(
 ///     "Example description",
 ///     ("Is Foo",   ["f", "foo"], terminal_toys::smargs::Argument::Optional("42")),
 ///     ("Sets Bar", ["b"],        terminal_toys::smargs::Argument::Flag),
@@ -1446,7 +1388,7 @@ mod tests {
 /// constructing a `Smargs` instance and then parsing the actual arguments.
 ///
 /// Arguments are defined using a list of tuples `(description, keys, kind)` and
-/// parsed from an `Iterator<Item = String>` into types of the __local__ `Arguments` -struct.
+/// parsed from an `Iterator<Item = String>` into types of the (here destructured) tuple.
 ///
 /// # Examples
 /// ```
@@ -1461,12 +1403,14 @@ mod tests {
 ///    "Matt", "-n", "Myman", "-n", "Jr"
 /// ];
 ///
-/// let (names, age, domain, no_news) = arguments!(
+/// let (names, age, domain, no_news)
+///     : (Vec<String>, usize, String, bool)
+///     = arguments!(
 ///     "Register for service",
-///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
 ///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
-///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
 ///     ("Your age",                              ["a", "age"],      Argument::Required),
+///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
+///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
 /// )
 /// .parse(args.into_iter().map(String::from))
 /// .map_err(|e| e.to_string())?;
@@ -1483,7 +1427,7 @@ mod tests {
 ///     std::process::exit(1);
 /// }
 ///
-/// let user_email = format!("{}.{}@{}.com", names.0.join("."), age, domain).replace(' ', ".").to_lowercase();
+/// let user_email = format!("{}.{}@{}.com", names.join("."), age, domain).replace(' ', ".").to_lowercase();
 ///
 /// let subscriber_count = newsletter_subscribers.len();
 /// if !no_news {
@@ -1503,12 +1447,14 @@ mod tests {
 ///
 /// let args = vec!["register.exe", "Matt Myman", "26"];
 ///
-/// let (names, age, domain, no_news) = arguments!(
+/// let (names, age, domain, no_news)
+///     : (Vec<String>, usize, String, bool) 
+///     = arguments!(
 ///     "Register for service",
-///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
 ///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
+///     ("Your age",                              ["a", "age"],      Argument::Required),
 ///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
-///     ("Your age",                              ["a", "age"],      Argument::Required)
+///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag)
 /// )
 /// .parse(args.into_iter().map(String::from))
 /// .map_err(|e| e.to_string())?;

@@ -6,31 +6,51 @@ Command line argument parser into types that implement `std::str::FromStr`.
 
 ### Example:
 ```rust
-use terminal_toys::{smärgs, smargs};
+use std::path::PathBuf;
+use std::io::Write;
 
-struct MyInput { repeats: usize, string: String, verbose: bool };
-let program_args = vec!["echon", "-v", "--amount", "3", "foo bar"];
+use terminal_toys::smargs;
 
-let MyInput { repeats, string, verbose } = terminal_toys::smärgs!(
-  "Echo a string N times",
-  MyInput {
-    repeats:("Amount of echoes",       vec!["amount"],       smargs::Kind::Required),
-    string: ("The string to echo",     vec![],               smargs::Kind::Required),
-    verbose:("Print more information", vec!["v", "verbose"], smargs::Kind::Flag)
-  },
+let program_args = vec![
+    "echon",
+    "--verbose",
+    "--amount", "3",
+    "-f", "baz.txt",
+    "-f", "qux.txt",
+    "foo bar",
+];
+
+let (repeats, string, verbose, copies)
+  : (usize, String, bool, Vec<PathBuf>)
+  = smargs::arguments!(
+  "Echo strings N times",
+  ("The string to echo",            vec![],               smargs::Argument::Required),
+  ("Amount of echoes",              vec!["amount"],       smargs::Argument::Optional("1")),
+  ("Print more information",        vec!["v", "verbose"], smargs::Argument::Flag),
+  ("Files to copy the output into", vec!["f", "file"],    smargs::Argument::List(0)),
 )
-.parse(program_args.into_iter().map(String::from))?;
+.parse(program_args.into_iter().map(String::from)).map_err(|e| e.to_string())?;
 
 assert_eq!(repeats, 3);
 assert_eq!(string, "foo bar");
 assert!(verbose);
+assert_eq!(copies.len(), 2);
+assert_eq!(copies[0], PathBuf::from("baz.txt"));
+assert_eq!(copies[1], PathBuf::from("qux.txt"));
 
-for i in 0..repeats {
-  print!("{}", string);
-  if verbose { eprintln!("{} repeats left", repeats - (i + 1)); }
+let message = std::iter::repeat(repeats).map(|_| string.clone()).collect::<String>();
+
+for f in copies {
+    std::fs::File::create(&f)
+        .and_then(|mut f| write!(f, "{}", message))
+        .map_err(|_| "Echo copying failed".to_string())?; 
+
+    if verbose { eprintln!("Wrote the message to {}", f.display()); }
 }
 
-# return Ok::<(), Box<smargs::Break>>(())
+print!("{}", message);
+
+# return Ok::<(), String>(())
 ```
 
 ## ProgressBar
