@@ -43,9 +43,7 @@ impl std::error::Error for TextErrorMessage {}
 /// Custom output type.
 type RegistrationInfo = (String, usize, String, String, bool);
 
-fn parse(
-    args: impl DoubleEndedIterator<Item = String>,
-) -> Result<RegistrationInfo, smargs::Error> {
+fn parse(args: impl DoubleEndedIterator<Item = String>) -> Result<RegistrationInfo, smargs::Error> {
     smargs::arguments!(
         "Register for a service",
         ("Your full name", [], smargs::Argument::Required),
@@ -99,11 +97,11 @@ fn construct_email(
     }?;
 
     let local_part = if local_part.is_empty() {
-            eprintln!("Constructing default local part for email");
-            format!("{}.{}", name, age)
-        } else {
-            local_part
-        };
+        eprintln!("Constructing default local part for email");
+        format!("{}.{}", name, age)
+    } else {
+        local_part
+    };
 
     Ok(format!("{}@{}.{}", local_part, domain, tld)
         .replace(' ', ".")
@@ -129,12 +127,7 @@ fn main() {
     let (name, age, local_part, domain, no_subscribe) = {
         // Catch this error in order to make demonstration of actual parsing easier.
         let x = match parse(std::env::args()) {
-            Err(e)
-                if matches!(
-                    e,
-                    smargs::Error::Missing(_),
-                ) && use_example_args() =>
-            {
+            Err(e) if matches!(e, smargs::Error::Missing(_),) && use_example_args() => {
                 // Use some hard-coded args for demonstration.
                 parse(example_args).expect("bad example args")
             }

@@ -150,7 +150,6 @@ fromsmarg_impl!(String);
 fromsmarg_impl!(bool);
 fromsmarg_impl!(std::path::PathBuf);
 
-
 /// Struct for defining program arguments and parsing them from command line
 /// syntax into required types.
 #[derive(Debug)]
@@ -407,6 +406,7 @@ where
                     let idx = state
                         .rindex
                         .ok_or_else(|| Error::UndefinedArgument(arg.clone()))?;
+
                     if let Some(first_val) =
                         state.values[idx].replace(Value::Just(arg.clone().value))
                     {
@@ -418,6 +418,7 @@ where
                             extra: (arg, state.values[idx].take().unwrap()),
                         });
                     }
+
                     state.next_unsatisfied_required_position(&self.list);
                 }
                 Key::Short { group_size: 2.. } => {
@@ -570,6 +571,7 @@ where
     }
 }
 
+#[derive(Debug)]
 struct ValueParserState {
     /// "RequiredINDEX"; index of the next required definition.
     rindex: Option<usize>,
@@ -652,19 +654,21 @@ impl ValueParserState {
                 );
             }
             Argument::List(_min) => {
-                if let Some(list) = self.values[key_matched_index].as_mut() {
-                    if let Some(value) = self.stack.pop() {
-                        list.push(value);
-                    } else {
-                        return Err(
-                            Error::Missing(smargs.list[key_matched_index].clone()));
-                    }
+                if self.values[key_matched_index].is_none() {
+                    self.values[key_matched_index].replace(Value::List(vec![]));
                 }
+
+                if let Some(value) = self.stack.pop() {
+                    self.values[key_matched_index].as_mut().unwrap().push(value);
+                } else {
+                    return Err(Error::Missing(smargs.list[key_matched_index].clone()));
+                }
+
                 // Update history; index matches with chosen value.
                 if self.history[key_matched_index].is_some() {
                     self.history[key_matched_index].as_mut().unwrap().push(arg);
                 } else {
-                    self.history[key_matched_index].replace(vec![]);
+                    self.history[key_matched_index].replace(vec![arg]);
                 }
             }
             _ => {
@@ -718,7 +722,6 @@ struct Help {
     short: String,
     long: String,
 }
-
 
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
@@ -779,7 +782,7 @@ impl fmt::Display for Error {
                     failed_with
                 )
             }
-            Self::UndefinedArgument(arg) => format!("extra argument '{}'", arg),
+            Self::UndefinedArgument(arg) => format!("undefined argument '{}'", arg),
             // TODO Suggest similar existing arguments in case of user typo.
             Self::UndefinedKey(key) => format!("option '{}' does not exist", key),
         };
@@ -905,7 +908,7 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 #[cfg(test)]
 mod tests {
-    use super::{Arg, Argument,  Error, Key, Result, Smarg, Smargs, Value};
+    use super::{Arg, Argument, Error, Key, Result, Smarg, Smargs, Value};
 
     // NOTE: Naming conventions:
     // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
@@ -1171,10 +1174,7 @@ mod tests {
             .parse("x --help".split(' ').map(String::from))
             .unwrap_err();
 
-        assert!(matches!(
-            err,
-            Error::Help,
-        ));
+        assert!(matches!(err, Error::Help,));
     }
 
     #[test]
@@ -1187,10 +1187,7 @@ mod tests {
         .parse("x --help".split(' ').map(String::from))
         .unwrap_err();
 
-        assert!(matches!(
-            err,
-            Error::Help
-        ));
+        assert!(matches!(err, Error::Help));
     }
 
     #[test]
@@ -1203,10 +1200,7 @@ mod tests {
         .parse("x -a 0 --help".split(' ').map(String::from))
         .unwrap_err();
 
-        assert!(matches!(
-            err,
-            Error::Help
-        ));
+        assert!(matches!(err, Error::Help));
     }
 
     // Error/panic-conditions:
@@ -1222,7 +1216,12 @@ mod tests {
 
         assert!(matches!(
             err,
-            Error::Missing(Smarg { desc, keys, kind: Argument::Required, value: Value::None })
+            Error::Missing(Smarg {
+                desc,
+                keys,
+                kind: Argument::Required,
+                value: Value::None
+            })
         ));
     }
 
@@ -1240,7 +1239,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            Error::UndefinedArgument(Arg { value: s, type_: Key::Position })
+            Error::UndefinedArgument(Arg {
+                value: s,
+                type_: Key::Position
+            })
         ));
     }
 
@@ -1253,10 +1255,12 @@ mod tests {
         .parse("x 0 1".split(' ').map(String::from))
         .unwrap_err();
 
-        assert!(
-            matches!(
-                err,
-                Error::UndefinedArgument(Arg { value: ref s, type_: Key::Position })
+        assert!(matches!(
+            err,
+            Error::UndefinedArgument(Arg {
+                value: ref s,
+                type_: Key::Position,
+            })
         ));
     }
 
@@ -1269,10 +1273,9 @@ mod tests {
         .parse("x -a 0 -a 1".split(' ').map(String::from))
         .unwrap_err();
 
-        assert!(
-            matches!(
+        assert!(matches!(
                 err,
-                
+
                Error::Duplicate {
                         first: (
                             Arg { value: ref fst_k, type_: Key::Short { group_size: 1 } },
@@ -1298,9 +1301,9 @@ mod tests {
         assert!(matches!(
             err,
             Error::Missing(Smarg {
-                    kind: Argument::Required,
-                    ..
-                }),
+                kind: Argument::Required,
+                ..
+            }),
         ));
     }
 
@@ -1315,10 +1318,10 @@ mod tests {
 
         assert!(matches!(
             err,
-             Error::Missing(Smarg {
-                    kind: Argument::Optional(_),
-                    ..
-                }),
+            Error::Missing(Smarg {
+                kind: Argument::Optional(_),
+                ..
+            }),
         ));
     }
 
@@ -1333,7 +1336,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            Error::UndefinedKey(Arg { value: s, type_: Key::Short { group_size: 1 } })
+            Error::UndefinedKey(Arg {
+                value: s,
+                type_: Key::Short { group_size: 1 }
+            })
         ));
     }
 
@@ -1346,8 +1352,7 @@ mod tests {
         .parse("x -1".split(' ').map(String::from))
         .unwrap_err();
 
-        assert!(
-            matches!(
+        assert!(matches!(
                 err,
                 Error::Parsing { of: Smarg { value: Value::Just(ref s), .. }, failed_with: ref boxed_err }
         ));
@@ -1448,7 +1453,7 @@ mod tests {
 /// let args = vec!["register.exe", "Matt Myman", "26"];
 ///
 /// let (names, age, domain, no_news)
-///     : (Vec<String>, usize, String, bool) 
+///     : (Vec<String>, usize, String, bool)
 ///     = arguments!(
 ///     "Register for service",
 ///     ("All portions of your full name listed", ["n"],             Argument::List(1)),

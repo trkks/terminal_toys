@@ -18,10 +18,10 @@ let program_args = vec![
     "-f", "baz.txt",
     "-f", "qux.txt",
     "foo bar",
-];
+].into_iter().map(String::from);
 
-let (repeats, string, verbose, copies)
-  : (usize, String, bool, Vec<PathBuf>)
+let (string, repeats, verbose, copies)
+  : (String, usize, bool, Vec<PathBuf>)
   = smargs::arguments!(
   "Echo strings N times",
   ("The string to echo",            vec![],               smargs::Argument::Required),
@@ -29,7 +29,7 @@ let (repeats, string, verbose, copies)
   ("Print more information",        vec!["v", "verbose"], smargs::Argument::Flag),
   ("Files to copy the output into", vec!["f", "file"],    smargs::Argument::List(0)),
 )
-.parse(program_args.into_iter().map(String::from)).map_err(|e| e.to_string())?;
+.parse(program_args).map_err(|e| e.to_string())?;
 
 assert_eq!(repeats, 3);
 assert_eq!(string, "foo bar");
@@ -38,7 +38,7 @@ assert_eq!(copies.len(), 2);
 assert_eq!(copies[0], PathBuf::from("baz.txt"));
 assert_eq!(copies[1], PathBuf::from("qux.txt"));
 
-let message = std::iter::repeat(repeats).map(|_| string.clone()).collect::<String>();
+let message = std::iter::repeat_with(|| string.clone()).take(repeats).collect::<String>();
 
 for f in copies {
     std::fs::File::create(&f)
