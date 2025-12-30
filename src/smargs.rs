@@ -1369,6 +1369,16 @@ mod tests {
             ],
         );
     }
+
+    #[test]
+    #[should_panic]
+    fn parse_list2_with_only_1_arg_res_panics() {
+        let _ = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec!["a"], Argument::List(2))],
+        )
+        .parse("x -a 1".split(' ').map(String::from));
+    }
 }
 
 /// # Usage
