@@ -908,17 +908,19 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 /// # Usage
 /// ```
-/// let (foo, bar, baz)
-///     : (usize, bool, String)
-///     = terminal_toys::smargs::arguments!(
+/// let (foo, bar, baz): (usize, bool, String) = terminal_toys::smargs::arguments!(
 ///     "Example description",
-///     ("Is Foo",   ["f", "foo"], terminal_toys::smargs::Argument::Optional("42")),
-///     ("Sets Bar", ["b"],        terminal_toys::smargs::Argument::Flag),
-///     ("Uses Baz", [],           terminal_toys::smargs::Argument::Required),
+///     (
+///         "Is Foo",
+///         ["f", "foo"],
+///         terminal_toys::smargs::Argument::Optional("42")
+///     ),
+///     ("Sets Bar", ["b"], terminal_toys::smargs::Argument::Flag),
+///     ("Uses Baz", [], terminal_toys::smargs::Argument::Required),
 /// )
 /// .parse(vec!["x", "-b", "Bazbaz"].into_iter().map(String::from))
 /// .unwrap();
-///
+
 /// assert_eq!(foo, 42_usize);
 /// assert_eq!(bar, true);
 /// assert_eq!(baz, "Bazbaz".to_owned());
@@ -937,21 +939,33 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 /// use terminal_toys::smargs::{arguments, Argument};
 ///
 /// let args = vec![
-///    "register",
-///    "--no-newsletter",
-///    "-a", "26",
-///    "-d", "hatch",
-///    "Matt", "-n", "Myman", "-n", "Jr"
+///     "register",
+///     "--no-newsletter",
+///     "-a",
+///     "26",
+///     "-d",
+///     "hatch",
+///     "Matt",
+///     "-n",
+///     "Myman",
+///     "-n",
+///     "Jr",
 /// ];
 ///
-/// let (names, age, domain, no_news)
-///     : (Vec<String>, usize, String, bool)
-///     = arguments!(
+/// let (names, age, domain, no_news): (Vec<String>, usize, String, bool) = arguments!(
 ///     "Register for service",
-///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
-///     ("Your age",                              ["a", "age"],      Argument::Required),
-///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
-///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
+///     (
+///         "All portions of your full name listed",
+///         ["n"],
+///         Argument::List(1)
+///     ),
+///     ("Your age", ["a", "age"], Argument::Required),
+///     ("Email address domain", ["d"], Argument::Optional("getspam")),
+///     (
+///         "Opt-out from receiving newsletter",
+///         ["no-newsletter"],
+///         Argument::Flag
+///     ),
 /// )
 /// .parse(args.into_iter().map(String::from))
 /// .map_err(|e| e.to_string())?;
@@ -962,13 +976,19 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 ///     let ys = 18 - age;
 ///     let putdown = format!(
 ///         "come back in {}",
-///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
+///         if ys == 1 {
+///             "a year".to_owned()
+///         } else {
+///             format!("{} years", ys)
+///         }
 ///     );
 ///     eprintln!("Failed to register: {}", putdown);
 ///     std::process::exit(1);
 /// }
 ///
-/// let user_email = format!("{}.{}@{}.com", names.join("."), age, domain).replace(' ', ".").to_lowercase();
+/// let user_email = format!("{}.{}@{}.com", names.join("."), age, domain)
+///     .replace(' ', ".")
+///     .to_lowercase();
 ///
 /// let subscriber_count = newsletter_subscribers.len();
 /// if !no_news {
@@ -989,14 +1009,20 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 ///
 /// let args = vec!["register.exe", "Matt Myman", "26"];
 ///
-/// let (names, age, domain, no_news)
-///     : (Vec<String>, usize, String, bool)
-///     = arguments!(
+/// let (names, age, domain, no_news): (Vec<String>, usize, String, bool) = arguments!(
 ///     "Register for service",
-///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
-///     ("Your age",                              ["a", "age"],      Argument::Required),
-///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
-///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag)
+///     (
+///         "All portions of your full name listed",
+///         ["n"],
+///         Argument::List(1)
+///     ),
+///     ("Your age", ["a", "age"], Argument::Required),
+///     ("Email address domain", ["d"], Argument::Optional("getspam")),
+///     (
+///         "Opt-out from receiving newsletter",
+///         ["no-newsletter"],
+///         Argument::Flag
+///     )
 /// )
 /// .parse(args.into_iter().map(String::from))
 /// .map_err(|e| e.to_string())?;
@@ -1007,6 +1033,7 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 /// assert_eq!(age, 26);
 /// # Ok(()) }
 /// ```
+
 #[macro_export]
 macro_rules! arguments {
     // Tuple-container (that is pre-impl'd).

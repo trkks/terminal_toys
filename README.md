@@ -6,30 +6,47 @@ Command line argument parser into types that implement `std::str::FromStr`.
 
 ### Example:
 ```rust
-use std::path::PathBuf;
 use std::io::Write;
+use std::path::PathBuf;
 
 use terminal_toys::smargs;
 
 let program_args = vec![
     "echon",
     "--verbose",
-    "--amount", "3",
-    "-f", "baz.txt",
-    "-f", "qux.txt",
+    "--amount",
+    "3",
+    "-f",
+    "baz.txt",
+    "-f",
+    "qux.txt",
     "foo bar",
-].into_iter().map(String::from);
+]
+.into_iter()
+.map(String::from);
 
-let (string, repeats, verbose, copies)
-  : (String, usize, bool, Vec<PathBuf>)
-  = smargs::arguments!(
-  "Echo strings N times",
-  ("The string to echo",            vec![],               smargs::Argument::Required),
-  ("Amount of echoes",              vec!["amount"],       smargs::Argument::Optional("1")),
-  ("Print more information",        vec!["v", "verbose"], smargs::Argument::Flag),
-  ("Files to copy the output into", vec!["f", "file"],    smargs::Argument::List(0)),
-)
-.parse(program_args).map_err(|e| e.to_string())?;
+let (string, repeats, verbose, copies): (String, usize, bool, Vec<PathBuf>) =
+    smargs::arguments!(
+        "Echo strings N times",
+        ("The string to echo", vec![], smargs::Argument::Required),
+        (
+            "Amount of echoes",
+            vec!["amount"],
+            smargs::Argument::Optional("1")
+        ),
+        (
+            "Print more information",
+            vec!["v", "verbose"],
+            smargs::Argument::Flag
+        ),
+        (
+            "Files to copy the output into",
+            vec!["f", "file"],
+            smargs::Argument::List(0)
+        ),
+    )
+    .parse(program_args)
+    .map_err(|e| e.to_string())?;
 
 assert_eq!(repeats, 3);
 assert_eq!(string, "foo bar");
@@ -38,14 +55,18 @@ assert_eq!(copies.len(), 2);
 assert_eq!(copies[0], PathBuf::from("baz.txt"));
 assert_eq!(copies[1], PathBuf::from("qux.txt"));
 
-let message = std::iter::repeat_with(|| string.clone()).take(repeats).collect::<String>();
+let message = std::iter::repeat_with(|| string.clone())
+    .take(repeats)
+    .collect::<String>();
 
 for f in copies {
     std::fs::File::create(&f)
         .and_then(|mut f| write!(f, "{}", message))
-        .map_err(|_| "Echo copying failed".to_string())?; 
+        .map_err(|_| "Echo copying failed".to_string())?;
 
-    if verbose { eprintln!("Wrote the message to {}", f.display()); }
+    if verbose {
+        eprintln!("Wrote the message to {}", f.display());
+    }
 }
 
 print!("{}", message);
