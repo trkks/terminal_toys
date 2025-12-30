@@ -906,6 +906,133 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6);
 tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7);
 tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 
+/// # Usage
+/// ```
+/// let (foo, bar, baz)
+///     : (usize, bool, String)
+///     = terminal_toys::smargs::arguments!(
+///     "Example description",
+///     ("Is Foo",   ["f", "foo"], terminal_toys::smargs::Argument::Optional("42")),
+///     ("Sets Bar", ["b"],        terminal_toys::smargs::Argument::Flag),
+///     ("Uses Baz", [],           terminal_toys::smargs::Argument::Required),
+/// )
+/// .parse(vec!["x", "-b", "Bazbaz"].into_iter().map(String::from))
+/// .unwrap();
+///
+/// assert_eq!(foo, 42_usize);
+/// assert_eq!(bar, true);
+/// assert_eq!(baz, "Bazbaz".to_owned());
+/// ```
+///
+/// # `arguments!`
+/// Convenience-macro for describing your program and its expected arguments,
+/// constructing a `Smargs` instance and then parsing the actual arguments.
+///
+/// Arguments are defined using a list of tuples `(description, keys, kind)` and
+/// parsed from an `Iterator<Item = String>` into types of the (here destructured) tuple.
+///
+/// # Examples
+/// ```
+/// # fn main() -> Result<(), String> {
+/// use terminal_toys::smargs::{arguments, Argument};
+///
+/// let args = vec![
+///    "register",
+///    "--no-newsletter",
+///    "-a", "26",
+///    "-d", "hatch",
+///    "Matt", "-n", "Myman", "-n", "Jr"
+/// ];
+///
+/// let (names, age, domain, no_news)
+///     : (Vec<String>, usize, String, bool)
+///     = arguments!(
+///     "Register for service",
+///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
+///     ("Your age",                              ["a", "age"],      Argument::Required),
+///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
+///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
+/// )
+/// .parse(args.into_iter().map(String::from))
+/// .map_err(|e| e.to_string())?;
+///
+/// let mut newsletter_subscribers = vec![];
+///
+/// if age < 18 {
+///     let ys = 18 - age;
+///     let putdown = format!(
+///         "come back in {}",
+///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
+///     );
+///     eprintln!("Failed to register: {}", putdown);
+///     std::process::exit(1);
+/// }
+///
+/// let user_email = format!("{}.{}@{}.com", names.join("."), age, domain).replace(' ', ".").to_lowercase();
+///
+/// let subscriber_count = newsletter_subscribers.len();
+/// if !no_news {
+///     newsletter_subscribers.push(&user_email);
+/// }
+///
+/// assert_eq!(user_email, "matt.myman.jr.26@hatch.com".to_string());
+/// assert_eq!(newsletter_subscribers.len(), subscriber_count);
+/// # Ok(()) }
+/// ```
+///
+/// Required arguments can be parsed based on the order in the macro's
+/// definition-list. Missing, but optional, arguments use the given default
+/// value.
+/// ```
+/// # fn main() -> Result<(), String> {
+/// use terminal_toys::smargs::{arguments, Argument};
+///
+/// let args = vec!["register.exe", "Matt Myman", "26"];
+///
+/// let (names, age, domain, no_news)
+///     : (Vec<String>, usize, String, bool)
+///     = arguments!(
+///     "Register for service",
+///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
+///     ("Your age",                              ["a", "age"],      Argument::Required),
+///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
+///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag)
+/// )
+/// .parse(args.into_iter().map(String::from))
+/// .map_err(|e| e.to_string())?;
+///
+/// assert!(!no_news);
+/// assert_eq!(names, vec!["Matt Myman"]);
+/// assert_eq!(domain, "getspam".to_string());
+/// assert_eq!(age, 26);
+/// # Ok(()) }
+/// ```
+#[macro_export]
+macro_rules! arguments {
+    // Tuple-container (that is pre-impl'd).
+    ( $program_desc:literal, $( ($arg_desc:literal, $keys:expr, $kind:expr) $(,)? ),+ ) => {
+       {
+            use terminal_toys::{
+                smargs::{Smargs, Smarg, Argument, Error, Value}
+            };
+
+            let mut smargs = Smargs::new($program_desc);
+            $(
+                smargs.push(Smarg {
+                    desc: $arg_desc,
+                    keys: $keys.to_vec(),
+                    kind: $kind,
+                    value: Value::None,
+                });
+            )+
+
+            smargs
+        }
+    };
+}
+
+pub use arguments;
+
 #[cfg(test)]
 mod tests {
     use super::{Arg, Argument, Error, Key, Result, Smarg, Smargs, Value};
@@ -1380,128 +1507,3 @@ mod tests {
         .parse("x -a 1".split(' ').map(String::from));
     }
 }
-
-/// # Usage
-/// ```
-/// let (foo, bar, baz)
-///     : (usize, bool, String)
-///     = terminal_toys::smargs::arguments!(
-///     "Example description",
-///     ("Is Foo",   ["f", "foo"], terminal_toys::smargs::Argument::Optional("42")),
-///     ("Sets Bar", ["b"],        terminal_toys::smargs::Argument::Flag),
-///     ("Uses Baz", [],           terminal_toys::smargs::Argument::Required),
-/// )
-/// .parse(vec!["x", "-b", "Bazbaz"].into_iter().map(String::from))
-/// .unwrap();
-///
-/// assert_eq!(foo, 42_usize);
-/// assert_eq!(bar, true);
-/// assert_eq!(baz, "Bazbaz".to_owned());
-/// ```
-/// # `arguments!`
-/// Convenience-macro for describing your program and its expected arguments,
-/// constructing a `Smargs` instance and then parsing the actual arguments.
-///
-/// Arguments are defined using a list of tuples `(description, keys, kind)` and
-/// parsed from an `Iterator<Item = String>` into types of the (here destructured) tuple.
-///
-/// # Examples
-/// ```
-/// # fn main() -> Result<(), String> {
-/// use terminal_toys::smargs::{arguments, Argument};
-///
-/// let args = vec![
-///    "register",
-///    "--no-newsletter",
-///    "-a", "26",
-///    "-d", "hatch",
-///    "Matt", "-n", "Myman", "-n", "Jr"
-/// ];
-///
-/// let (names, age, domain, no_news)
-///     : (Vec<String>, usize, String, bool)
-///     = arguments!(
-///     "Register for service",
-///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
-///     ("Your age",                              ["a", "age"],      Argument::Required),
-///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
-///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag),
-/// )
-/// .parse(args.into_iter().map(String::from))
-/// .map_err(|e| e.to_string())?;
-///
-/// let mut newsletter_subscribers = vec![];
-///
-/// if age < 18 {
-///     let ys = 18 - age;
-///     let putdown = format!(
-///         "come back in {}",
-///          if ys == 1 { "a year".to_owned() } else { format!("{} years", ys) }
-///     );
-///     eprintln!("Failed to register: {}", putdown);
-///     std::process::exit(1);
-/// }
-///
-/// let user_email = format!("{}.{}@{}.com", names.join("."), age, domain).replace(' ', ".").to_lowercase();
-///
-/// let subscriber_count = newsletter_subscribers.len();
-/// if !no_news {
-///     newsletter_subscribers.push(&user_email);
-/// }
-///
-/// assert_eq!(user_email, "matt.myman.jr.26@hatch.com".to_string());
-/// assert_eq!(newsletter_subscribers.len(), subscriber_count);
-/// # Ok(()) }
-/// ```
-/// Required arguments can be parsed based on the order in the macro's
-/// definition-list. Missing, but optional, arguments use the given default
-/// value.
-/// ```
-/// # fn main() -> Result<(), String> {
-/// use terminal_toys::smargs::{arguments, Argument};
-///
-/// let args = vec!["register.exe", "Matt Myman", "26"];
-///
-/// let (names, age, domain, no_news)
-///     : (Vec<String>, usize, String, bool)
-///     = arguments!(
-///     "Register for service",
-///     ("All portions of your full name listed", ["n"],             Argument::List(1)),
-///     ("Your age",                              ["a", "age"],      Argument::Required),
-///     ("Email address domain",                  ["d"],             Argument::Optional("getspam")),
-///     ("Opt-out from receiving newsletter",     ["no-newsletter"], Argument::Flag)
-/// )
-/// .parse(args.into_iter().map(String::from))
-/// .map_err(|e| e.to_string())?;
-///
-/// assert!(!no_news);
-/// assert_eq!(names, vec!["Matt Myman"]);
-/// assert_eq!(domain, "getspam".to_string());
-/// assert_eq!(age, 26);
-/// # Ok(()) }
-/// ```
-#[macro_export]
-macro_rules! arguments {
-    // Tuple-container (that is pre-impl'd).
-    ( $program_desc:literal, $( ($arg_desc:literal, $keys:expr, $kind:expr) $(,)? ),+ ) => {
-       {
-            use terminal_toys::{
-                smargs::{Smargs, Smarg, Argument, Error, Value}
-            };
-
-            let mut smargs = Smargs::new($program_desc);
-            $(
-                smargs.push(Smarg {
-                    desc: $arg_desc,
-                    keys: $keys.to_vec(),
-                    kind: $kind,
-                    value: Value::None,
-                });
-            )+
-
-            smargs
-        }
-    };
-}
-
-pub use arguments;
