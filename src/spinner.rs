@@ -53,10 +53,13 @@ impl Animation for Spinner {
 /// that runs until the end of `concrete_job`, showing that it is processing
 /// # Example:
 /// ```
-/// let result = terminal_toys::spinner::start_spinner(||
-///     std::iter::repeat(2).take(20).fold(44040192, |acc, x| acc / x)
-/// ).unwrap();
-/// // (The spinner spins at the end of the line while computing the result)
+/// let result = terminal_toys::spinner::start_spinner(|| {
+///     let mut acc = 44040192;
+///     for _ in 0..20 {
+///         acc /= 2;
+///     }
+///     acc
+/// }).unwrap();
 /// assert_eq!(result, 42);
 /// ```
 pub fn start_spinner<T, F>(job: F) -> io::Result<T>
