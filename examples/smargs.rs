@@ -85,15 +85,12 @@ fn construct_email(
     age: usize,
     local_part: String,
     domain: String,
-) -> Result<String, smargs::Error> {
+) -> Result<String, String> {
     let split = domain.rsplit_once('.');
     let (domain, tld) = match split {
         Some((l, r)) if !l.is_empty() && !r.is_empty() => Ok((l, r)),
         Some((l, _)) if !l.is_empty() => Ok((l, "com")),
-        _ => Err(smargs::Error::Dummy(Box::new(TextErrorMessage(format!(
-            "malformed domain: '{}'",
-            domain
-        ))))),
+        _ => Err(format!("malformed domain: '{}'", domain)),
     }?;
 
     let local_part = if local_part.is_empty() {

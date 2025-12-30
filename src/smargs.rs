@@ -117,7 +117,18 @@ where
                         failed_with: Box::new(error),
                     })
                 } else {
-                    let values = results.into_iter().map(|x| x.unwrap().unwrap()).collect();
+                    let values = results
+                        .into_iter()
+                        .map(|x| x.unwrap().unwrap())
+                        .collect::<Vec<T>>();
+
+                    // Handle special case with required multi-value args.
+                    if let Argument::List(required_len) = smarg.kind {
+                        if values.len() < required_len {
+                            return Err(Error::Missing(smarg));
+                        }
+                    }
+
                     Ok(values)
                 }
             }
@@ -726,10 +737,6 @@ struct Help {
 /// Error type for getting and parsing the values of arguments.
 #[derive(Debug)]
 pub enum Error {
-    /// Convenience for users working with `Error`. Wrap the user-defined
-    /// `error` in `Error::Dummy` so it can be passed around like other `Error`
-    /// variants.
-    Dummy(Box<dyn error::Error>),
     /// Found an unexpected extra match for `Smarg`.
     Duplicate {
         first: (Arg, Value),
@@ -754,7 +761,6 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
-            Self::Dummy(error) => format!("{}, baka.", error),
             Self::Duplicate { first, extra } => {
                 format!(
                     "already matched {}: {} but then found {}: {}",
@@ -1265,6 +1271,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_list2_with_only_1_arg_res_errors_req_arg_missing_value() {
+        let err = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec!["a"], Argument::List(2))],
+        )
+        .parse("x -a 1".split(' ').map(String::from))
+        .unwrap_err();
+
+        let Error::Missing(ref smarg) = err else {
+            panic!("Expected err to match Error::Missing");
+        };
+        assert!(
+            matches!(smarg, Smarg {
+                    desc,
+                    keys,
+                    kind: Argument::List(2),
+                    value: Value::List(xs)
+                } if xs.len() == 1 && xs[0] == "1"),
+            "{:?}",
+            err
+        );
+    }
+
+    #[test]
     fn parse_maybe_by_key_res_maybe_from_value() {
         let (a,) = Smargs::<(Result<usize>,)>::with_definition(
             "Test program",
@@ -1522,15 +1552,5 @@ mod tests {
                 ("Aa", vec!["a"], Argument::Flag),
             ],
         );
-    }
-
-    #[test]
-    #[should_panic]
-    fn parse_list2_with_only_1_arg_res_panics() {
-        let _ = Smargs::<(Vec<usize>,)>::with_definition(
-            "Test program",
-            [("A", vec!["a"], Argument::List(2))],
-        )
-        .parse("x -a 1".split(' ').map(String::from));
     }
 }
