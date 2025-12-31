@@ -222,7 +222,6 @@ where
                 Argument::OptionalList(ref defaults) => {
                     Value::List(defaults.iter().map(|&x| x.to_owned()).collect())
                 }
-                Argument::Maybe => Value::None,
             };
             value.replace(fillin);
         }
@@ -294,7 +293,7 @@ where
                                 display.to_string()
                             }
                         )),
-                        Argument::OptionalList(_) | Argument::Optional(_) | Argument::Maybe => {
+                        Argument::OptionalList(_) | Argument::Optional(_) => {
                             Some(format!("[{}]", display))
                         }
                     }
@@ -844,7 +843,6 @@ impl Display for Smarg {
             Argument::OptionalList(defaults) => {
                 format!("[<VALUE>] defaults [{}]", defaults.join(","))
             }
-            Argument::Maybe => "<VALUE>".to_owned(),
         };
 
         write!(f, "{}{} - {}", keystring, note, self.desc)
@@ -869,10 +867,6 @@ pub enum Argument {
     RequiredList,
     /// A collection of zero or more amount of arguments.
     OptionalList(Vec<&'static str>),
-    /// An argument that returns with its error instead of interrupting (i.e.,
-    /// breaking) so the default can be computed after when parsing has
-    /// failed.
-    Maybe,
 }
 
 impl Argument {
@@ -1370,44 +1364,6 @@ mod tests {
             ),
             "{:?}",
             err
-        );
-    }
-
-    #[test]
-    fn parse_maybe_by_key_res_maybe_from_value() {
-        let (a,) = Smargs::<(Result<usize>,)>::with_definition(
-            "Test program",
-            [("A", vec!["a"], Argument::Maybe)],
-        )
-        .parse("x -a 0".split(' ').map(String::from))
-        .unwrap();
-
-        assert_eq!(a.0.unwrap(), 0);
-    }
-
-    // NOTE: Maybe "maybe" might be a bad name as the value needs to eventually
-    // be something...
-    #[test]
-    fn parse_req_by_position_no_maybe_res_req_from_position_maybe_errors_missing() {
-        let (a, b) = Smargs::<(usize, Result<usize>)>::with_definition(
-            "Test program",
-            [
-                ("A", vec![], Argument::Required),
-                ("B", vec!["b"], Argument::Maybe),
-            ],
-        )
-        .parse("x 0".split(' ').map(String::from))
-        .unwrap();
-
-        assert_eq!(a, 0);
-        let b_err = b.0.unwrap_err();
-        assert!(
-            matches!(
-                b_err,
-                Error::Missing(Smarg { desc, ref keys, kind: Argument::Maybe, value: Value::None }) if desc == "B" && keys[0] == "b",
-            ),
-            "{}",
-            b_err
         );
     }
 
