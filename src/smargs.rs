@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 /// Return pattern for all required argument kinds.
 macro_rules! required_kinds {
     () => {
-        Argument::Required | Argument::List(1..)
+        Argument::Required | Argument::RequiredList
     };
 }
 
@@ -90,48 +90,38 @@ where
     <T as FromStr>::Err: error::Error + 'static,
 {
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
-        match &smarg.value {
-            Value::None => Err(Error::Missing(smarg)),
-            Value::Just(x) => Ok(vec![<T as FromStr>::from_str(x).map_err(|e| {
-                Error::Parsing {
-                    of: smarg,
-                    failed_with: Box::new(e),
-                }
-            })?]),
-            Value::List(xs) => {
-                let mut results: Vec<Option<StdResult<T, _>>> = xs
-                    .iter()
-                    .map(|x| Some(<T as FromStr>::from_str(x)))
-                    .collect();
-                let mut found_error = None;
-                for (i, result) in results.iter().enumerate() {
-                    if result.as_ref().unwrap().is_err() {
-                        found_error = Some(i);
-                        break;
-                    }
-                }
-                if let Some(i) = found_error {
-                    let error = results[i].take().unwrap().unwrap_err();
-                    Err(Error::Parsing {
-                        of: smarg,
-                        failed_with: Box::new(error),
-                    })
-                } else {
-                    let values = results
-                        .into_iter()
-                        .map(|x| x.unwrap().unwrap())
-                        .collect::<Vec<T>>();
+        let Some(values) = (match smarg.value {
+            Value::None => None,
+            Value::Just(ref x) => Some(vec![x.clone()]),
+            Value::List(ref xs) => Some(xs.clone()),
+        }) else {
+            return Err(Error::Missing(smarg));
+        };
 
-                    // Handle special case with required multi-value args.
-                    if let Argument::List(required_len) = smarg.kind {
-                        if values.len() < required_len {
-                            return Err(Error::Missing(smarg));
-                        }
-                    }
-
-                    Ok(values)
-                }
+        let mut results: Vec<Option<StdResult<T, _>>> = values
+            .iter()
+            .map(|x| Some(<T as FromStr>::from_str(x)))
+            .collect();
+        let mut found_error = None;
+        for (i, result) in results.iter().enumerate() {
+            if result.as_ref().unwrap().is_err() {
+                found_error = Some(i);
+                break;
             }
+        }
+        if let Some(i) = found_error {
+            let error = results[i].take().unwrap().unwrap_err();
+            Err(Error::Parsing {
+                of: smarg,
+                failed_with: Box::new(error),
+            })
+        } else {
+            let values = results
+                .into_iter()
+                .map(|x| x.unwrap().unwrap())
+                .collect::<Vec<T>>();
+
+            Ok(values)
         }
     }
 }
@@ -229,7 +219,9 @@ where
                 required_kinds!() => {
                     return Err(Error::Missing(self.list[i].clone()));
                 }
-                Argument::List(_) => Value::List(vec![]),
+                Argument::OptionalList(ref defaults) => {
+                    Value::List(defaults.iter().map(|&x| x.to_owned()).collect())
+                }
                 Argument::Maybe => Value::None,
             };
             value.replace(fillin);
@@ -291,7 +283,9 @@ where
                         .unwrap_or(x.desc);
                     match x.kind {
                         Argument::Help => None,
-                        Argument::Required => Some(format!("<{}>", display)),
+                        Argument::Required | Argument::RequiredList => {
+                            Some(format!("<{}>", display))
+                        }
                         Argument::Flag => Some(format!(
                             "[-{}]",
                             if display.len() > 1 {
@@ -300,7 +294,7 @@ where
                                 display.to_string()
                             }
                         )),
-                        Argument::List(_) | Argument::Optional(_) | Argument::Maybe => {
+                        Argument::OptionalList(_) | Argument::Optional(_) | Argument::Maybe => {
                             Some(format!("[{}]", display))
                         }
                     }
@@ -414,23 +408,41 @@ where
                     // TODO: CHECK IMPLEMENTATION: The positioned options
                     // have lower precedence compared to the explicit
                     // key-value method.
+                    // TODO: Related (maybe): Should (make sure that?) the required args be
+                    // satisfied in order of definition i.e.,
+                    // (Req1, List(min: 2), Req2)
+                    // => [A1, A2, A3, A4, A5]
+                    // => { Req1: A1, List(min: 2): [A2, A3, A5], Req2: A4 }
                     let idx = state
                         .rindex
                         .ok_or_else(|| Error::UndefinedArgument(arg.clone()))?;
 
-                    if let Some(first_val) =
-                        state.values[idx].replace(Value::Just(arg.clone().value))
-                    {
-                        return Err(Error::Duplicate {
-                            first: (
-                                state.history[idx].as_mut().unwrap().pop().unwrap(),
-                                first_val,
-                            ),
-                            extra: (arg, state.values[idx].take().unwrap()),
-                        });
+                    if state.values[idx].is_none() {
+                        state.values[idx].replace(Value::Just(arg.clone().value));
+                    } else {
+                        match self.list[idx].kind {
+                            Argument::Required => {
+                                return Err(Error::Duplicate {
+                                    first: (
+                                        state.history[idx].as_mut().unwrap().pop().unwrap(),
+                                        state.values[idx].as_ref().unwrap().clone(),
+                                    ),
+                                    extra: (arg, state.values[idx].take().unwrap()),
+                                });
+                            }
+                            Argument::RequiredList => {
+                                state.values[idx].as_mut().unwrap().push(arg.clone().value)
+                            }
+                            _ => panic!("At this point it should not be possible to interpret non-required arg as positional:\n{:?}\n{:?}", self.list[idx], state.values[idx])
+                        }
                     }
 
                     state.next_unsatisfied_required_position(&self.list);
+
+                    if state.history[idx].is_none() {
+                        state.history[idx].replace(vec![]);
+                    }
+                    state.history[idx].as_mut().unwrap().push(arg);
                 }
                 Key::Short { group_size: 2.. } => {
                     // Replace the args-queue's front with the "normalized"
@@ -604,16 +616,21 @@ impl ValueParserState {
     }
 
     fn next_unsatisfied_required_position(&mut self, definitions: &[Smarg]) {
-        self.rindex = definitions
+        let rindex = definitions
             .iter()
             .enumerate()
-            .find_map(|(i, x)|
-                (
-                    x.kind.is_required() && self.values[i].is_none()
-                    || matches!((&x.kind, &self.values[i]), (Argument::List(n), Some(Value::List(xs))) if xs.len() < *n)
-                )
-                .then_some(i)
-            );
+            .find_map(|(i, x)| (x.kind.is_required() && self.values[i].is_none()).then_some(i));
+        // If all required arguments are satisfied, pass the rest to the (last) required list
+        // argument.
+        if !(rindex.is_none()
+            && self.rindex.is_some()
+            && matches!(
+                definitions[self.rindex.unwrap()].kind,
+                Argument::RequiredList
+            ))
+        {
+            self.rindex = rindex;
+        }
     }
 
     /// Select and update state based on the matched value for given key, i.e.,
@@ -664,7 +681,7 @@ impl ValueParserState {
                     "should be impossible to overwrite flag's history"
                 );
             }
-            Argument::List(_min) => {
+            Argument::RequiredList | Argument::OptionalList(_) => {
                 if self.values[key_matched_index].is_none() {
                     self.values[key_matched_index].replace(Value::List(vec![]));
                 }
@@ -821,9 +838,12 @@ impl Display for Smarg {
 
         let note = match &self.kind {
             Argument::Required => "<REQUIRED>".to_owned(),
+            Argument::RequiredList => "[<REQUIRED>]".to_owned(),
             Argument::Optional(default) => format!("<VALUE default '{}'>", default),
             Argument::Flag | Argument::Help => "".to_owned(),
-            Argument::List(n) => format!("[<VALUE>; {}]", n),
+            Argument::OptionalList(defaults) => {
+                format!("[<VALUE>] defaults [{}]", defaults.join(","))
+            }
             Argument::Maybe => "<VALUE>".to_owned(),
         };
 
@@ -845,8 +865,10 @@ pub enum Argument {
     /// means signaling the event of or __turning on__ something, certainly not
     /// the contrary.
     Flag,
-    /// A collection of some minimum number of arguments.
-    List(usize),
+    /// A collection of some non-zero amount of arguments.
+    RequiredList,
+    /// A collection of zero or more amount of arguments.
+    OptionalList(Vec<&'static str>),
     /// An argument that returns with its error instead of interrupting (i.e.,
     /// breaking) so the default can be computed after when parsing has
     /// failed.
@@ -963,7 +985,7 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 ///     (
 ///         "All portions of your full name listed",
 ///         ["n"],
-///         Argument::List(1)
+///         Argument::RequiredList
 ///     ),
 ///     ("Your age", ["a", "age"], Argument::Required),
 ///     ("Email address domain", ["d"], Argument::Optional("getspam")),
@@ -1020,7 +1042,7 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 ///     (
 ///         "All portions of your full name listed",
 ///         ["n"],
-///         Argument::List(1)
+///         Argument::RequiredList
 ///     ),
 ///     ("Your age", ["a", "age"], Argument::Required),
 ///     ("Email address domain", ["d"], Argument::Optional("getspam")),
@@ -1244,51 +1266,108 @@ mod tests {
     }
 
     #[test]
-    fn parse_list2_by_keys_res_list2_from_values() {
+    fn parse_optlist0_no_args_res_list_empty() {
         let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Argument::List(2))],
+            [("A", vec![], Argument::OptionalList(vec![]))],
+        )
+        .parse("x".split(' ').map(String::from))
+        .unwrap();
+
+        assert_eq!(a.len(), 0);
+    }
+
+    #[test]
+    fn parse_reqlist_by_position_res_single_value_from_position() {
+        let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec![], Argument::RequiredList)],
+        )
+        .parse("x 0".split(' ').map(String::from))
+        .unwrap();
+
+        assert_eq!(a.len(), 1);
+        assert_eq!(a.first(), Some(&0));
+    }
+
+    #[test]
+    fn parse_reqlist_by_two_positions_res_two_values_from_positions() {
+        let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec![], Argument::RequiredList)],
+        )
+        .parse("x 0 1".split(' ').map(String::from))
+        .unwrap();
+
+        assert_eq!(a.len(), 2);
+        assert_eq!(a.first(), Some(&0));
+        assert_eq!(a.get(1), Some(&1));
+    }
+
+    #[test]
+    fn parse_optlist2_by_key_res_list1_from_value() {
+        let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec!["a"], Argument::OptionalList(vec!["1", "2"]))],
+        )
+        .parse("x -a 0".split(' ').map(String::from))
+        .unwrap();
+
+        assert_eq!(a.len(), 1);
+        assert_eq!(a.first(), Some(&0));
+    }
+
+    #[test]
+    fn parse_reqlist_by_keys_res_list2_from_values() {
+        let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec!["a"], Argument::RequiredList)],
         )
         .parse("x -a 0 -a 1".split(' ').map(String::from))
         .unwrap();
 
+        assert_eq!(a.len(), 2);
         assert_eq!(a.first(), Some(&0));
         assert_eq!(a.get(1), Some(&1));
     }
 
     // TODO: Is this usual/logical behaviour?
     #[test]
-    fn parse_list2_fst_by_position_snd_by_key_res_fst_from_position_snd_from_key() {
+    fn parse_reqlist_fst_by_position_snd_by_key_res_fst_from_position_snd_from_key() {
         let (a,) = Smargs::<(Vec<usize>,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Argument::List(2))],
+            [("A", vec!["a"], Argument::RequiredList)],
         )
         .parse("x 0 -a 1".split(' ').map(String::from))
         .unwrap();
 
+        assert_eq!(a.len(), 2);
         assert_eq!(a.first(), Some(&0));
         assert_eq!(a.get(1), Some(&1));
     }
 
     #[test]
-    fn parse_list2_with_only_1_arg_res_errors_req_arg_missing_value() {
+    fn parse_reqlist_without_args_res_errors_req_arg_missing_value() {
         let err = Smargs::<(Vec<usize>,)>::with_definition(
             "Test program",
-            [("A", vec!["a"], Argument::List(2))],
+            [("A", vec!["a"], Argument::RequiredList)],
         )
-        .parse("x -a 1".split(' ').map(String::from))
+        .parse("x".split(' ').map(String::from))
         .unwrap_err();
 
         let Error::Missing(ref smarg) = err else {
             panic!("Expected err to match Error::Missing");
         };
         assert!(
-            matches!(smarg, Smarg {
+            matches!(
+                smarg,
+                Smarg {
                     desc,
                     keys,
-                    kind: Argument::List(2),
-                    value: Value::List(xs)
-                } if xs.len() == 1 && xs[0] == "1"),
+                    kind: Argument::RequiredList,
+                    value: Value::None
+                }
+            ),
             "{:?}",
             err
         );

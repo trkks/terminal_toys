@@ -42,7 +42,7 @@ let (string, repeats, verbose, copies): (String, usize, bool, Vec<PathBuf>) =
         (
             "Files to copy the output into",
             vec!["f", "file"],
-            smargs::Argument::List(0)
+            smargs::Argument::OptionalList(vec![])
         ),
     )
     .parse(program_args)
