@@ -126,7 +126,6 @@ where
     }
 }
 
-// TODO Implement all the plausible types with a macro.
 /// Mass-implement `FromSmarg` for all plausible std basic types.
 macro_rules! fromsmarg_impl {
     ( $t:ty ) => {
@@ -138,7 +137,23 @@ macro_rules! fromsmarg_impl {
                         of: smarg.clone(),
                         failed_with: Box::new(e),
                     }),
-                    Value::List(_xs) => panic!("bad"),
+                    Value::List(_) => panic!(
+                        "Type vs argument mismatch. Did you mean to define the argument {} of type {} as Vec<{}> instead?",
+                        smarg
+                            .keys
+                            .iter()
+                            .max()
+                            .map(|x|
+                                format!(
+                                    "{}{}",
+                                    if x.len() > 1 { "--" } else {"-"},
+                                    x
+                                )
+                            )
+                            .unwrap_or(format!("'{}...'", smarg.desc)),
+                        stringify!($t),
+                        stringify!($t)
+                    ),
                 }
             }
         }
@@ -876,23 +891,6 @@ impl Argument {
     }
 }
 
-#[derive(Debug)]
-pub struct Result<T>(pub StdResult<T, Error>);
-
-/// Generic implementation for all types that implement `FromStr` but
-/// into the Result-wrapper for returning errors from parsing specific
-/// arguments.
-impl<T> FromSmarg for Result<T>
-where
-    T: FromSmarg,
-{
-    fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
-        // The Result-wrapper will always be constructed (containing the value or
-        // an error), so "failing to parse" it from string is impossible.
-        Ok(Result(<T as FromSmarg>::from_smarg(smarg)))
-    }
-}
-
 /// This implementation supports adding a help message to an argumentless
 /// program.
 impl TryFrom<Smargs<Self>> for () {
@@ -1055,7 +1053,6 @@ tryfrom_impl!(T1, T2, T3, T4, T5, T6, T7, T8);
 /// assert_eq!(age, 26);
 /// # Ok(()) }
 /// ```
-
 #[macro_export]
 macro_rules! arguments {
     // Tuple-container (that is pre-impl'd).
@@ -1084,7 +1081,7 @@ pub use arguments;
 
 #[cfg(test)]
 mod tests {
-    use super::{Arg, Argument, Error, Key, Result, Smarg, Smargs, Value};
+    use super::{Arg, Argument, Error, Key, Smarg, Smargs, Value};
 
     // NOTE: Naming conventions:
     // Scheme: <target method>_<scenario>_res[ults in]_<expected behavior>,
@@ -1367,7 +1364,6 @@ mod tests {
         );
     }
 
-    // This seems (too much?) like a use-case...
     #[test]
     fn parse_1st_and_3rd_req_by_pos_no_2nd_opt_res_opt_from_default() {
         let (a, b, c) = Smargs::<(usize, usize, usize)>::with_definition(
@@ -1421,8 +1417,6 @@ mod tests {
 
         assert!(matches!(err, Error::Help));
     }
-
-    // Error/panic-conditions:
 
     #[test]
     fn parse_no_req_res_errors_req_arg_missing_value() {
@@ -1587,5 +1581,49 @@ mod tests {
                 ("Aa", vec!["a"], Argument::Flag),
             ],
         );
+    }
+
+    /// List vs. single value typing will result in runtime error, which -- considering we're
+    /// parsing program arguments -- would likely be caught early in the execution and testing.
+    #[test]
+    #[should_panic]
+    fn parse_single_type_as_list_by_position_res_panics() {
+        // Typing as a single value by accident.
+        let _ = Smargs::<(usize,)>::with_definition(
+            "Test program",
+            // Defining as list argument.
+            [("A", vec![], Argument::RequiredList)],
+        )
+        .parse("x 0".split(' ').map(String::from));
+    }
+
+    #[test]
+    #[should_panic]
+    fn parse_list_type_as_single_by_position_res_panics() {
+        let _ = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec![], Argument::Required)],
+        )
+        .parse("x 0".split(' ').map(String::from));
+    }
+
+    #[test]
+    #[should_panic]
+    fn parse_single_type_as_list_by_key_res_panics() {
+        let _ = Smargs::<(usize,)>::with_definition(
+            "Test program",
+            [("A", vec!["a"], Argument::RequiredList)],
+        )
+        .parse("x -a 0".split(' ').map(String::from));
+    }
+
+    #[test]
+    #[should_panic]
+    fn parse_list_type_as_single_by_key_res_panics() {
+        let _ = Smargs::<(Vec<usize>,)>::with_definition(
+            "Test program",
+            [("A", vec!["a"], Argument::Required)],
+        )
+        .parse("x -a 0".split(' ').map(String::from));
     }
 }
