@@ -48,24 +48,6 @@ pub enum Value {
     List(Vec<String>),
 }
 
-impl Value {
-    /// Add the string to the value and "upgrade" to the bigger variant along
-    /// the way.
-    fn push(&mut self, value: String) {
-        match self {
-            Self::None => {
-                *self = Self::Just(value);
-            }
-            Self::Just(x) => {
-                *self = Self::List(vec![x.to_owned(), value]);
-            }
-            Self::List(xs) => {
-                xs.push(value);
-            }
-        }
-    }
-}
-
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -92,7 +74,28 @@ where
     fn from_smarg(smarg: Smarg) -> StdResult<Self, Error> {
         let Some(values) = (match smarg.value {
             Value::None => None,
-            Value::Just(ref x) => Some(vec![x.clone()]),
+            Value::Just(x) => panic!(
+                        "Type vs argument mismatch. Did you mean to define the argument {} of type {} as Vec<{}> instead?",
+                        {
+                            let k = smarg
+                            .keys
+                            .iter()
+                            .max()
+                            .map(|x|
+                                format!(
+                                    "{}{} ",
+                                    if x.len() > 1 { "--" } else {"-"},
+                                    x
+                                )
+                            )
+                            .unwrap_or_default();
+ 
+                            format!("'{}{}'", k, x)
+                        },
+                        std::any::type_name::<T>(),
+                        std::any::type_name::<T>(),
+                    ),
+
             Value::List(ref xs) => Some(xs.clone()),
         }) else {
             return Err(Error::Missing(smarg));
@@ -137,20 +140,33 @@ macro_rules! fromsmarg_impl {
                         of: smarg.clone(),
                         failed_with: Box::new(e),
                     }),
-                    Value::List(_) => panic!(
-                        "Type vs argument mismatch. Did you mean to define the argument {} of type {} as Vec<{}> instead?",
-                        smarg
+                    Value::List(xs) => panic!(
+                        "Type vs argument mismatch. Did you mean to define the argument{} of type {} as Vec<{}> instead?",
+                        {
+                            let k = smarg
                             .keys
                             .iter()
                             .max()
                             .map(|x|
                                 format!(
-                                    "{}{}",
+                                    "{}{} ",
                                     if x.len() > 1 { "--" } else {"-"},
                                     x
                                 )
                             )
-                            .unwrap_or(format!("'{}...'", smarg.desc)),
+                            .unwrap_or_default();
+
+                            let ys = xs
+                                .iter()
+                                .map(|x| format!("{}{}", k, x))
+                                .collect::<Vec<String>>();
+
+                            if ys.len() == 1 {
+                                format!(" '{}'", ys[0])
+                            } else {
+                                format!("s '{}'", ys.join(", "))
+                            }
+                        },
                         stringify!($t),
                         stringify!($t)
                     ),
@@ -278,12 +294,10 @@ where
         smargs
     }
 
-    /// Parse the argument strings into the type `Ts` according to the
-    /// definition of `self` which may include using default values for some
-    /// fields.
+    /// Parse the argument strings into the type `Ts` according to the definition of `self` which
+    /// may include using default values for some fields.
     ///
-    /// Note that the name of the program/command is assumed to be the first
-    /// item in `args`.
+    /// Note that the name of the program/command name is assumed to be the first item in `args`.
     pub fn parse(
         mut self,
         mut args: impl DoubleEndedIterator<Item = String>,
@@ -441,7 +455,11 @@ where
                         .ok_or_else(|| Error::UndefinedArgument(arg.clone()))?;
 
                     if state.values[idx].is_none() {
-                        state.values[idx].replace(Value::Just(arg.clone().value));
+                        match self.list[idx].kind {
+                            Argument::Required => state.values[idx] = Some(Value::Just(arg.clone().value)),
+                            Argument::RequiredList => state.values[idx] = Some(Value::List(vec![arg.clone().value])),
+                            _ => panic!("Bug: Failed to normalize non-required argument as keyed and instead trying to parse as positional: \n{:?}\n{:?}", self.list[idx], state.values[idx]),
+                        }
                     } else {
                         match self.list[idx].kind {
                             Argument::Required => {
@@ -454,9 +472,12 @@ where
                                 });
                             }
                             Argument::RequiredList => {
-                                state.values[idx].as_mut().unwrap().push(arg.clone().value)
+                                match state.values[idx].as_mut() {
+                                    Some(Value::List(ref mut xs)) => xs.push(arg.clone().value),
+                                    _ => panic!("Bug: Failed to initialize list Argument as list Value"),
+                                }
                             }
-                            _ => panic!("At this point it should not be possible to interpret non-required arg as positional:\n{:?}\n{:?}", self.list[idx], state.values[idx])
+                            _ => panic!("Bug: Failed to normalize non-required argument as keyed and instead trying to parse as positional: \n{:?}\n{:?}", self.list[idx], state.values[idx])
                         }
                     }
 
@@ -694,7 +715,10 @@ impl ValueParserState {
                 }
 
                 if let Some(value) = self.stack.pop() {
-                    self.values[key_matched_index].as_mut().unwrap().push(value);
+                    match self.values[key_matched_index].as_mut() {
+                        Some(Value::List(ref mut xs)) => xs.push(value),
+                        _ => panic!("Bug: Failed to initialize list Argument as list Value"),
+                    }
                 } else {
                     return Err(Error::Missing(smargs.list[key_matched_index].clone()));
                 }
@@ -1582,6 +1606,9 @@ mod tests {
 
     /// List vs. single value typing will result in runtime error, which -- considering we're
     /// parsing program arguments -- would likely be caught early in the execution and testing.
+    ///
+    /// NOTE that in order to raise the chances of catching the logic error __panicking__ is
+    /// preferrable, not returning an error.
     #[test]
     #[should_panic]
     fn parse_single_type_as_list_by_position_res_panics() {
