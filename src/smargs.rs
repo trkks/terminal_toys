@@ -158,13 +158,13 @@ macro_rules! fromsmarg_impl {
 
                             let ys = xs
                                 .iter()
-                                .map(|x| format!("{}{}", k, x))
+                                .map(|x| format!("'{}{}'", k, x))
                                 .collect::<Vec<String>>();
 
                             if ys.len() == 1 {
-                                format!(" '{}'", ys[0])
+                                format!(" {}", ys[0])
                             } else {
-                                format!("s '{}'", ys.join(", "))
+                                format!("s {}", ys.join(", "))
                             }
                         },
                         stringify!($t),
