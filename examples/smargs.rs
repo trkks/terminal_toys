@@ -1,44 +1,4 @@
-use std::{fmt::Display, str::FromStr};
 use terminal_toys::smargs;
-
-/// A custom type to parse from an argument.
-#[derive(Debug)]
-struct NonEmptyString(String);
-
-/// A custom error to return when parsing fails.
-#[derive(Debug)]
-struct StringIsEmptyError;
-impl Display for StringIsEmptyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "empty string")
-    }
-}
-/// The `Err` variant in `SmargsResult` requires implementing
-/// `std::error::Error` for using custom types.
-impl std::error::Error for StringIsEmptyError {}
-
-/// Bringing the two, custom type and parsing error together.
-impl FromStr for NonEmptyString {
-    type Err = StringIsEmptyError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if !s.is_empty() {
-            Ok(Self(<String as FromStr>::from_str(s).unwrap()))
-        } else {
-            Err(StringIsEmptyError)
-        }
-    }
-}
-
-/// Type for a simple error message.
-#[derive(Debug)]
-struct TextErrorMessage(String);
-impl Display for TextErrorMessage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for TextErrorMessage {}
 
 /// Custom output type.
 type RegistrationInfo = (String, usize, String, String, bool);
