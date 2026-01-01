@@ -75,7 +75,7 @@ where
         let Some(values) = (match smarg.value {
             Value::None => None,
             Value::Just(x) => panic!(
-                        "Type vs argument mismatch. Did you mean to define the argument {} of type {} as Vec<{}> instead?",
+                        "Type vs argument mismatch. Did you mean to define the argument {} of type {} as {} instead?",
                         {
                             let k = smarg
                             .keys
@@ -92,7 +92,7 @@ where
  
                             format!("'{}{}'", k, x)
                         },
-                        std::any::type_name::<T>(),
+                        std::any::type_name::<Self>(),
                         std::any::type_name::<T>(),
                     ),
 
@@ -141,7 +141,7 @@ macro_rules! fromsmarg_impl {
                         failed_with: Box::new(e),
                     }),
                     Value::List(xs) => panic!(
-                        "Type vs argument mismatch. Did you mean to define the argument{} of type {} as Vec<{}> instead?",
+                        "Type vs argument mismatch. Did you mean to define the argument{} of type Vec<{}> as {} instead?",
                         {
                             let k = smarg
                             .keys
